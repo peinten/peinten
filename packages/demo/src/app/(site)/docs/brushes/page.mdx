@@ -1,0 +1,85 @@
+export const metadata = { title: 'Brushes · peinten docs' };
+
+# Brushes
+
+peinten ports the brush engine of libmypaint's master branch: its settings, inputs and mapping curves, the dab state
+machine, smudge and the 2.0 inputs (barrel rotation, tilt declination, attack angle and view zoom). `.myb` files
+in MyPaint's current JSON format (version 3) load as they are; settings and inputs this port does not know are listed
+in `ignored` and skipped, as libmypaint does. Other versions are rejected.
+
+## Resources
+
+The active brush is part of the runtime's shared **resources**, together with the color and Krita-style overrides.
+
+```ts
+await runtime.setResources({
+  color: [0.9, 0.2, 0.1], // straight RGB in 0..1
+  eraser: true,           // any brush erases instead of painting
+  size: 40,               // diameter in pixels, or null for the brush's own size
+  opacity: 0.5,           // multiplier, or null
+});
+```
+
+## Brush files and presets
+
+```ts
+import { parseMyb, presets, serializeMyb } from 'peinten';
+
+const { brush, ignored } = parseMyb(await file.text(), 'My brush'); // `ignored` lists unknown settings
+await runtime.setResources({ brush });
+
+await runtime.setResources({ brush: presets.find((preset) => preset.name === 'Pencil')! });
+const text = serializeMyb(brush);
+```
+
+The bundled presets come from mypaint-brushes. Settings metadata (`BRUSH_SETTING_INFO`, `BRUSH_INPUT_INFO`) and
+helpers such as `baseValueOf` and `withBaseValues` let you build brush editors.
+
+## Previewing a brush
+
+A preview is a small document plus a view without input. Its history and GPU caches stay separate from your main
+canvas. `previewStrokeSamples` produces an S-shaped stroke whose pressure rises and falls, and `resolveBrush` applies
+the same overrides the brush tool uses, so the preview matches what the user paints.
+
+```ts
+import { ops, previewStrokeSamples, resolveBrush } from 'peinten';
+
+const size = { width: 512, height: 96 };
+const preview = await runtime.createDocument({ ...size, history: false });
+await runtime.createView({ canvas, document: preview, input: false, background: 'transparent' });
+
+// Redraw whenever runtime.getSnapshot().resources changes.
+const nodeId = preview.getSnapshot().rootIds[0]!;
+await preview.dispatch([
+  ops.clear({ nodeId }),
+  ops.stroke({ target: { nodeId }, brush: resolveBrush(resources), samples: previewStrokeSamples(size), seed: 1 }),
+]);
+```
+
+The fixed seed keeps the preview stable for a given brush.
+
+## Pigment mixing
+
+Colors mix in three places: picking up color under the brush, smudging, and laying a dab on the canvas. Each blends
+an additive result with a pigment result according to the brush's `paint_mode`. The pigment part is pluggable:
+
+```ts
+interface ColorMixer {
+  readonly id: string;
+  readonly latentSize: number;
+  toLatent(r: number, g: number, b: number, out: Float32Array, offset: number): void;
+  fromLatent(latent: Float32Array, offset: number, out: Float32Array): void;
+}
+```
+
+The default `libMyPaintPigmentMixer` mixes ten spectral bands in log space, like libmypaint 2.0. Any mixer that
+interpolates linearly in a latent space fits, Mixbox included. Mixbox's license does not permit commercial use, so it
+is not bundled; write an adapter if your license allows it. Pass the mixer as `colorMixer`; every collaborator must
+use the same one, because mixing changes the pixels every peer recomputes.
+
+## Strokes and determinism
+
+A stroke operation stores the brush, the target, a seed and its input samples (position, pressure, tilt, time, view
+zoom and rotation, barrel rotation) as a `Float32Array`. Live painting uses the same quantized samples, so replaying
+the operation produces identical tiles. Brush state resets for each stroke so that a stroke can be recomputed on its
+own; unlike in MyPaint, smudge color therefore does not carry over from one stroke to the next.

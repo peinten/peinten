@@ -1,0 +1,33 @@
+export const metadata = { title: 'Introduction · peinten docs' };
+
+# Introduction
+
+peinten is a raster painting engine written in pure TypeScript.
+It stores pixels in 64 px tiles on the CPU, paints with a port of libmypaint's brush engine, and composites and
+displays with WebGPU. The engine knows nothing about your UI framework: you talk to it through a small async API and
+read its state from synchronous snapshots.
+
+## What it covers
+
+- **Layers**: paint layers, folders with pass-through, adjustment layers and text layers, with 26 blend modes.
+- **Brushes**: libmypaint `.myb` brushes with pressure, tilt, barrel rotation, smudge and spectral pigment mixing,
+  plus a Krita-style eraser toggle and size and opacity overrides.
+- **Selections**: rectangle, ellipse, lasso, polygon, magic wand and quick mask. Dragging inside a selection moves it.
+- **Transform**: affine, perspective and mesh, with a live GPU preview.
+- **Filters**: WGSL filters applied destructively or through adjustment layers, from one implementation.
+- **Text**: per-range styles, point and area text, horizontal and vertical writing.
+- **History**: an operation log with rollback and replay, so undo works the same alone and together.
+- **Collaboration**: a sequencer that totally orders operations, with transports for browser tabs, tests and your
+  own server.
+- **Files**: `.peinten` documents in CBOR, and PNG, JPEG and PSD export.
+
+## How it is built
+
+Brush dabs are computed on the CPU. JavaScript arithmetic follows IEEE 754 on every platform, while the precision of
+GPU floating point varies between vendors and drivers, so CPU dabs keep strokes independent of the GPU. That matters
+for collaboration, where every peer recomputes strokes from their input samples (the one remaining caveat is
+described under Determinism in [Collaboration](/docs/collaboration)). The GPU takes the work that benefits from parallelism:
+compositing the layer stack, filters, previews and display. A Web Worker can host the whole engine, so painting does
+not compete with the UI thread.
+
+Continue with [Getting started](/docs/getting-started), or [open the demo](/demo) to try it.

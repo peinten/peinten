@@ -1,0 +1,140 @@
+import { isEmptyTile, MASK_TILE_LENGTH, TILE_SIZE, type TileKey, tileKey } from '../tiles/tile.ts';
+import type { MaskMap, Rect } from '../tiles/tile-map.ts';
+import { type MaskBounds, renderDabMask } from './dab-mask.ts';
+import type { DabParams, Surface } from './surface.ts';
+
+const ONE = 1 << 15;
+const maskBuffer = new Uint16Array(TILE_SIZE * TILE_SIZE);
+const maskBounds: MaskBounds = { x0: 0, y0: 0, x1: 0, y1: 0 };
+
+/**
+ * Brush surface over single-channel selection coverage. This is what quick mask paints on.
+ * Dabs blend coverage towards the dab's target alpha, so painting selects and erasing deselects.
+ */
+export class MaskSurface implements Surface {
+  readonly #base: MaskMap;
+  readonly #bounds: Rect;
+  readonly #work = new Map<TileKey, Uint16Array>();
+  #dirty = new Set<TileKey>();
+
+  constructor(base: MaskMap, bounds: Rect) {
+    this.#base = base;
+    this.#bounds = bounds;
+  }
+
+  #inBounds(tx: number, ty: number): boolean {
+    const b = this.#bounds;
+    return (
+      tx >= Math.floor(b.x / TILE_SIZE) &&
+      ty >= Math.floor(b.y / TILE_SIZE) &&
+      tx <= Math.floor((b.x + b.width - 1) / TILE_SIZE) &&
+      ty <= Math.floor((b.y + b.height - 1) / TILE_SIZE)
+    );
+  }
+
+  readTile(key: TileKey): Uint16Array | undefined {
+    return this.#work.get(key) ?? this.#base.get(key);
+  }
+
+  drawDab(dab: Readonly<DabParams>): boolean {
+    const opaque = Math.min(Math.max(dab.opaque, 0), 1);
+    const hardness = Math.min(Math.max(dab.hardness, 0), 1);
+    const softness = Math.min(Math.max(dab.softness, 0), 1);
+    if (dab.radius < 0.1 || hardness === 0 || softness === 1 || opaque === 0) return false;
+    const target = Math.trunc(Math.min(Math.max(dab.colorA, 0), 1) * ONE);
+    const opacity = Math.trunc(opaque * ONE);
+    const rFringe = dab.radius + 1;
+    const tx1 = Math.floor(Math.floor(dab.x - rFringe) / TILE_SIZE);
+    const tx2 = Math.floor(Math.floor(dab.x + rFringe) / TILE_SIZE);
+    const ty1 = Math.floor(Math.floor(dab.y - rFringe) / TILE_SIZE);
+    const ty2 = Math.floor(Math.floor(dab.y + rFringe) / TILE_SIZE);
+    for (let ty = ty1; ty <= ty2; ty++) {
+      for (let tx = tx1; tx <= tx2; tx++) {
+        if (!this.#inBounds(tx, ty)) continue;
+        const b = renderDabMask(
+          maskBuffer,
+          dab.x - tx * TILE_SIZE,
+          dab.y - ty * TILE_SIZE,
+          dab.radius,
+          hardness,
+          softness,
+          dab.aspectRatio,
+          dab.angle,
+          maskBounds,
+        );
+        if (!b) continue;
+        const key = tileKey(tx, ty);
+        let tile = this.#work.get(key);
+        if (!tile) {
+          tile = this.#base.get(key)?.slice() ?? new Uint16Array(MASK_TILE_LENGTH);
+          this.#work.set(key, tile);
+        }
+        this.#dirty.add(key);
+        for (let y = b.y0; y <= b.y1; y++) {
+          for (let x = b.x0; x <= b.x1; x++) {
+            const i = y * TILE_SIZE + x;
+            const m = maskBuffer[i]!;
+            if (!m) continue;
+            const opaA = (m * opacity) >>> 15;
+            tile[i] = (opaA * target + (ONE - opaA) * tile[i]!) >>> 15;
+          }
+        }
+      }
+    }
+    return true;
+  }
+
+  /** Reports the average coverage as a gray, fully opaque color. */
+  getColor(x: number, y: number, radiusIn: number, out: Float64Array): void {
+    const radius = radiusIn < 1 ? 1 : radiusIn;
+    let weight = 0;
+    let sum = 0;
+    const rFringe = radius + 1;
+    for (
+      let ty = Math.floor(Math.floor(y - rFringe) / TILE_SIZE);
+      ty <= Math.floor(Math.floor(y + rFringe) / TILE_SIZE);
+      ty++
+    ) {
+      for (
+        let tx = Math.floor(Math.floor(x - rFringe) / TILE_SIZE);
+        tx <= Math.floor(Math.floor(x + rFringe) / TILE_SIZE);
+        tx++
+      ) {
+        const b = renderDabMask(maskBuffer, x - tx * TILE_SIZE, y - ty * TILE_SIZE, radius, 0.5, 0.5, 1, 0, maskBounds);
+        if (!b) continue;
+        const tile = this.readTile(tileKey(tx, ty));
+        for (let yy = b.y0; yy <= b.y1; yy++) {
+          for (let xx = b.x0; xx <= b.x1; xx++) {
+            const i = yy * TILE_SIZE + xx;
+            const m = maskBuffer[i]!;
+            weight += m;
+            sum += m * (tile?.[i] ?? 0);
+          }
+        }
+      }
+    }
+    const value = weight > 0 ? sum / weight / ONE : 0;
+    out[0] = out[1] = out[2] = value;
+    out[3] = 1;
+  }
+
+  takeDirty(): TileKey[] {
+    const keys = [...this.#dirty];
+    this.#dirty = new Set();
+    return keys;
+  }
+
+  get workingTiles(): ReadonlyMap<TileKey, Uint16Array> {
+    return this.#work;
+  }
+
+  commit(): MaskMap {
+    if (this.#work.size === 0) return this.#base;
+    const result = new Map(this.#base);
+    for (const [key, tile] of this.#work) {
+      if (isEmptyTile(tile)) result.delete(key);
+      else result.set(key, tile);
+    }
+    return result;
+  }
+}

@@ -1,0 +1,43 @@
+export const metadata = { title: 'Tools · peinten docs' };
+
+# Tools
+
+A tool turns input into operations, strokes and previews. Tools implement `ITool` and talk to the engine only through
+the `ToolContext` they receive. The engine contains no tool-specific code: a marquee, a lasso or a transform handle
+reaches it only as operations and previews, so tools can be replaced or added without touching the engine.
+
+## Built-in tools
+
+Import them from `peinten/tools`. Their option, UI state and command types (`TransformOptions`, `WandToolOptions`,
+…) come from there too.
+
+| Class | Default id | Options | Commands |
+|---|---|---|---|
+| `BrushTool` | `brush` (pass `{ id, eraser: true }` for an eraser) | none | none |
+| `ColorPickerTool` | `color-picker` | none | none |
+| `ShapeSelectTool` | `select-rect` or `select-ellipse` | `mode`, `antialias` | none |
+| `LassoSelectTool` | `select-lasso` | `mode`, `antialias` | none |
+| `PolygonSelectTool` | `select-polygon` | `mode`, `antialias` | none |
+| `WandSelectTool` | `select-wand` | `mode`, `antialias`, `tolerance`, `contiguous` | none |
+| `TransformTool` | `transform` | `mode` (`affine`, `perspective`, `mesh`), `meshSize` | `commit`, `cancel`, `flip-x`, `flip-y` |
+| `TextTool` | `text` | `writingMode`, `fontFamily`, `fontSize` | none |
+| `PanTool`, `ZoomTool`, `RotateTool` | `pan`, `zoom`, `rotate` | none | none |
+
+```ts
+await runtime.setTool('transform');
+await runtime.setToolOptions('transform', { mode: 'mesh', meshSize: 6 });
+await runtime.runToolCommand('transform', 'commit');
+```
+
+Options are state the UI shows and edits. Commands are one-shot events such as "apply the transform". Some tools
+also publish UI state, for example whether the brush can paint on the active layer or whether a transform is in
+progress. It appears in `runtime.getSnapshot().tool.uiState`.
+
+The brush tool switches to erasing while the pen's eraser end touches the tablet, as Krita does. Tilt is normalized
+across browsers before tools see it (rebuilt from `altitudeAngle` and `azimuthAngle` where a browser reports only
+those). Barrel rotation is passed through from `twist`, and is 0 for anything but a pen.
+
+## Your own tools
+
+Tools are ordinary classes, so an application can add its own next to the built-in ones or replace them. See
+[Custom tools](/docs/custom-tools).

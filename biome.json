@@ -1,0 +1,119 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": {
+    "includes": ["**", "!**/node_modules", "!**/dist", "!**/.next", "!**/out", "!**/next-env.d.ts"]
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single"
+    }
+  },
+  "linter": {
+    "rules": {
+      "preset": "recommended",
+      "style": {
+        "noNonNullAssertion": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["packages/peinten/src/domain/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/application/**", "**/infrastructure/**", "**/tools/**"],
+                    "message": "domain must not depend on outer layers."
+                  },
+                  {
+                    "group": ["comlink", "cbor-x", "ag-psd", "webgpu-utils"],
+                    "message": "domain may only use pure computation libraries."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/peinten/src/application/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/infrastructure/**", "**/tools/**"],
+                    "message": "application must not depend on infrastructure or tools."
+                  },
+                  {
+                    "group": ["comlink", "cbor-x", "ag-psd", "webgpu-utils"],
+                    "message": "Wrap external I/O libraries behind a port in infrastructure."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/peinten/src/tools/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/infrastructure/**", "**/application/**", "!**/application/tool.ts"],
+                    "message": "Tools may only depend on application/tool.ts and domain."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/peinten/src/infrastructure/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/tools/**"],
+                    "message": "infrastructure implements ports; it must not depend on tool implementations."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  }
+}

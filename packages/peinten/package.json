@@ -1,0 +1,85 @@
+{
+  "name": "peinten",
+  "version": "0.1.0",
+  "description": "Tile-based raster painting engine with a libmypaint brush engine and WebGPU compositing",
+  "license": "MIT",
+  "homepage": "https://peinten.vercel.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/peinten/peinten.git",
+    "directory": "packages/peinten"
+  },
+  "bugs": "https://github.com/peinten/peinten/issues",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./worker": "./src/worker.ts",
+    "./collab": "./src/collab.ts",
+    "./tools": "./src/tools.ts",
+    "./exporting": "./src/exporting.ts"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./worker": {
+        "types": "./dist/worker.d.ts",
+        "default": "./dist/worker.js"
+      },
+      "./collab": {
+        "types": "./dist/collab.d.ts",
+        "default": "./dist/collab.js"
+      },
+      "./tools": {
+        "types": "./dist/tools.d.ts",
+        "default": "./dist/tools.js"
+      },
+      "./exporting": {
+        "types": "./dist/exporting.d.ts",
+        "default": "./dist/exporting.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "NOTICE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.domain.json --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:gpu": "vitest run --project gpu",
+    "prepack": "pnpm run build"
+  },
+  "dependencies": {
+    "ag-psd": "31.0.3",
+    "cbor-x": "1.6.7",
+    "comlink": "4.4.2",
+    "earcut": "3.2.4",
+    "fflate": "0.8.3",
+    "mutative": "2.0.0",
+    "valibot": "1.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "@webgpu/types": "0.1.74",
+    "fast-png": "8.0.0",
+    "vitest": "5.0.5",
+    "webgpu": "0.6.2"
+  },
+  "keywords": [
+    "painting",
+    "raster",
+    "brush",
+    "libmypaint",
+    "webgpu",
+    "canvas",
+    "drawing",
+    "collaboration"
+  ]
+}

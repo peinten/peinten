@@ -1,0 +1,188 @@
+export const metadata = { title: 'Custom tools · peinten docs' };
+
+# Custom tools
+
+A tool receives normalized input and a `ToolContext`. It changes the document only through that context: by
+submitting operations, by starting live strokes, or by showing previews that are never saved. Because every
+persistent change still ends up as an operation, a custom tool gets undo, the worker build and collaboration without
+extra work.
+
+The tool contract (`ITool`, `ToolContext`, `ToolPointerEvent`, `OverlayBuilder`) comes from the main `peinten`
+entry; the built-in tools in `peinten/tools` implement the same interface.
+
+## A line tool
+
+This tool draws a straight brush stroke from where the pointer goes down to where it is released, showing a dashed
+guide while dragging. It uses each part of the contract: options, UI state, a command, the overlay and a live
+stroke.
+
+```ts title="line-tool.ts"
+import {
+  type ITool,
+  type OverlayBuilder,
+  resolveBrush,
+  type ToolContext,
+  type ToolPointerEvent,
+} from 'peinten';
+
+export interface LineOptions {
+  /** Pen pressure applied along the line, 0..1. */
+  readonly pressure: number;
+}
+
+export interface LineUIState {
+  readonly drawing: boolean;
+}
+
+export type LineCommand = 'cancel';
+
+export class LineTool implements ITool<'line', LineOptions, LineUIState, LineCommand> {
+  readonly id = 'line';
+  readonly defaultOptions: LineOptions = { pressure: 0.7 };
+  #options = this.defaultOptions;
+  #drag: { pointerId: number; x0: number; y0: number; x1: number; y1: number } | null = null;
+
+  setOptions(options: Partial<LineOptions>): void {
+    this.#options = { ...this.#options, ...options };
+  }
+
+  onPointerDown(e: ToolPointerEvent, ctx: ToolContext): void {
+    if (e.button !== 0) return;
+    this.#drag = { pointerId: e.pointerId, x0: e.x, y0: e.y, x1: e.x, y1: e.y };
+    ctx.notifyUIState();
+  }
+
+  onPointerMove(e: ToolPointerEvent, ctx: ToolContext): void {
+    const drag = this.#drag;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    drag.x1 = e.x;
+    drag.y1 = e.y;
+    ctx.requestOverlay();
+  }
+
+  onPointerUp(e: ToolPointerEvent, ctx: ToolContext): void {
+    const drag = this.#drag;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    this.#reset(ctx);
+    this.#paint(drag.x0, drag.y0, e.x, e.y, ctx);
+  }
+
+  onPointerCancel(ctx: ToolContext): void {
+    this.#reset(ctx);
+  }
+
+  deactivate(ctx: ToolContext): void {
+    this.#reset(ctx);
+  }
+
+  runCommand(command: LineCommand, ctx: ToolContext | null): void {
+    if (command === 'cancel') this.#reset(ctx);
+  }
+
+  getUIState(): LineUIState {
+    return { drawing: this.#drag !== null };
+  }
+
+  drawOverlay(overlay: OverlayBuilder): void {
+    const drag = this.#drag;
+    if (drag) overlay.polyline([drag.x0, drag.y0, drag.x1, drag.y1], { dashed: true, outline: true });
+  }
+
+  #reset(ctx: ToolContext | null): void {
+    this.#drag = null;
+    ctx?.requestOverlay();
+    ctx?.notifyUIState();
+  }
+
+  #paint(x0: number, y0: number, x1: number, y1: number, ctx: ToolContext): void {
+    const stroke = ctx.beginStroke({ brush: resolveBrush(ctx.resources.get()) });
+    // Null when the active layer cannot be painted on, e.g. a folder or a locked layer.
+    if (!stroke) return;
+    const { zoom, rotation } = ctx.viewport.get();
+    const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 2));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      stroke.addSample({
+        x: x0 + (x1 - x0) * t,
+        y: y0 + (y1 - y0) * t,
+        // Zero pressure on the last sample lifts the pen.
+        pressure: i === steps ? 0 : this.#options.pressure,
+        xtilt: 0,
+        ytilt: 0,
+        dtime: 0.004,
+        viewzoom: zoom,
+        viewrotation: rotation,
+        barrelRotation: 0,
+      });
+    }
+    void stroke.end();
+  }
+}
+```
+
+## Registering and driving it
+
+Add the tool to the tuple the runtime is created with. In the worker build that happens in the worker script.
+
+```ts title="tools.ts"
+import { BrushTool, PanTool } from 'peinten/tools';
+import { LineTool } from './line-tool';
+
+export const createTools = () => [new BrushTool(), new LineTool(), new PanTool()] as const;
+export type Tools = ReturnType<typeof createTools>;
+```
+
+Its id, options, UI state and commands are then typed across the runtime:
+
+```ts
+await runtime.setTool('line');
+await runtime.setToolOptions('line', { pressure: 0.4 });
+await runtime.runToolCommand('line', 'cancel');
+
+const tool = runtime.getSnapshot().tool;
+if (tool.id === 'line') console.log(tool.options.pressure, tool.uiState?.drawing);
+```
+
+## The contract
+
+Every method is optional except `id` and `defaultOptions`.
+
+| Member | Called when |
+|---|---|
+| `activate(ctx)` | The active tool receives input from a view for the first time, binding it to that view |
+| `deactivate(ctx)` | The user switches tools, input moves to another view, or the bound view or the runtime is disposed; drop unfinished work here |
+| `onPointerDown`, `onPointerMove`, `onPointerUp` | Pointer input on the view, already normalized |
+| `onPointerCancel(ctx)` | The pointer was lost, for example to an OS gesture; drop unfinished work here |
+| `onKeyDown`, `onKeyUp` | Key input while the canvas has focus, except Space, which the view keeps for panning |
+| `setOptions(options, ctx)` | `runtime.setToolOptions` was called; `ctx` is null unless the tool is active and bound to a view |
+| `runCommand(command, ctx)` | `runtime.runToolCommand` was called; `ctx` is null unless the tool is active and bound to a view |
+| `getUIState()` | The runtime builds a snapshot, e.g. after `notifyUIState()`, `setToolOptions` or `runToolCommand`; return structured-clone friendly data |
+| `drawOverlay(overlay, ctx)` | A frame is drawn; add vector shapes in document or screen coordinates |
+
+Options are state that the runtime stores and the UI edits; commands are one-shot events. Keep options in the tool
+as received from `setOptions` rather than changing them internally, otherwise the snapshot and the tool disagree.
+
+### The tool context
+
+| Member | Use |
+|---|---|
+| `document` | Read-only state, the active node, this client's selection, `submit(drafts)` and `setActiveNode` |
+| `beginStroke({ brush, target?, seed? })` | Starts a live stroke that renders as samples arrive and commits a `stroke` operation on `end()`; `cancel()` discards it |
+| `resources` | Read and update the shared brush resources |
+| `viewport` | `get()`, `size`, `toDocument`, `toScreen`, `panBy`, `zoomAt`, `rotateAt` |
+| `preview.setWarp`, `preview.setSelectionOffset` | GPU previews that are never saved |
+| `requestOverlay()` | Redraw the overlay from `drawOverlay` |
+| `notifyUIState()` | Publish a new `getUIState()` value |
+
+### Pointer events
+
+`ToolPointerEvent` carries document coordinates (`x`, `y`) and screen coordinates in canvas pixels, pressure, tilt
+and twist in screen space, the same values with the view's rotation and flip undone (`docTiltX`, `docTiltY`,
+`docTwist`), modifiers, the timestamp, and whether the pen's eraser end is in use (`eraserTip`). Browser differences
+in tilt reporting are normalized before tools see the event.
+
+## Determinism
+
+A tool runs only on the client whose user is holding the pen. What it produces must still be reproducible on every
+peer, which is why it should change the document only through operations and strokes. Randomness belongs in the
+stroke seed (`beginStroke({ seed })`), not in tool code that computes pixels itself.

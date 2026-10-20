@@ -1,0 +1,94 @@
+export const metadata = { title: 'Editing documents · peinten docs' };
+
+# Editing documents
+
+Every persistent change is an **operation** dispatched to the document. Operations are deterministic, structured
+clone friendly data. Undo replays them, the worker bridge posts them to the worker as plain data, and collaborators
+recompute them from the same data, so all three rely on the same representation.
+
+## Dispatching
+
+Create drafts with the `ops` factories. Ids are assigned on the client, so you can reference a node right away.
+
+```ts
+import { importImage, ops } from 'peinten';
+
+const folder = ops.addGroup({ name: 'Character' });
+const layer = ops.addLayer({ parentId: folder.nodeId, name: 'Line' });
+await doc.dispatch([folder, layer]); // an array is atomic and undoes as one step
+await doc.setActiveNode(layer.nodeId);
+
+await doc.dispatch(ops.updateNode({ nodeId: layer.nodeId, props: { blendMode: 'multiply', opacity: 0.8 } }));
+await doc.dispatch(await importImage(file, { name: file.name }));
+```
+
+Placement uses `parentId` (`null` for the root) and `index`, where a higher index is drawn later, i.e. higher in
+the stack.
+
+| Group | Factories |
+|---|---|
+| Nodes | `addLayer` `addGroup` `addAdjustmentLayer` `addTextLayer` `removeNode` `moveNode` `updateNode` `updateText` `duplicateNode` |
+| Pixels | `stroke` `clear` `putPixels` `applyFilter` `rasterizeNode` `warp` |
+| Selection | `selectShape` `selectWand` `selectAll` `deselect` `invertSelection` `moveSelection` |
+
+The built-in tools produce the same operation drafts; all but the brush tool, whose stroke draft is built by the
+live stroke session, use these factories.
+
+## Local state
+
+Some state is per client and never enters history: the active layer, quick mask mode and filter previews on the
+document; the active tool, tool options and brush resources on the runtime. Each has its own method, such as
+`doc.setActiveNode`, `doc.setQuickMask` or `runtime.setResources`.
+
+## Undo and redo
+
+```ts
+await doc.undo();
+await doc.redo();
+```
+
+History is an ordered log of batches with the state before each one. Undo issues an operation that disables your
+batch; the document rolls back to just before it and replays everything after. Tiles are immutable, so rolling back
+only swaps references. Each client has its own undo stack and undoes only its own batches. Later batches from
+collaborators are replayed on top; a batch that no longer applies (for example strokes on a layer whose creation was
+undone) is skipped on every peer alike.
+
+Undo during a stroke cancels the stroke. Pass `history: false` to `createDocument` for throwaway documents such as
+brush previews, or `history: { limit }` to change how many steps are kept.
+
+## Custom operations
+
+Define an operation with a [valibot](https://valibot.dev) schema for its payload and a pure `apply`, then register
+it with the runtime. Collaborators must register the same operations.
+
+```ts
+import * as v from 'valibot';
+import { createRuntime, defineOperation, OperationConflictError } from 'peinten';
+
+interface RenameLayerDraft {
+  readonly type: 'rename-layer';
+  readonly nodeId: string;
+  readonly name: string;
+}
+
+export const renameLayer = defineOperation<RenameLayerDraft>({
+  type: 'rename-layer',
+  schema: v.object({ nodeId: v.string(), name: v.pipe(v.string(), v.maxLength(256)) }),
+  apply(state, op) {
+    const node = state.nodes.get(op.nodeId);
+    // Skips the batch on every peer alike, e.g. when a collaborator removed the layer meanwhile.
+    if (!node) throw new OperationConflictError('The layer no longer exists');
+    const nodes = new Map(state.nodes);
+    nodes.set(op.nodeId, { ...node, name: op.name });
+    return { ...state, nodes };
+  },
+});
+
+const runtime = await createRuntime({ tools, operations: [renameLayer] });
+const draft: RenameLayerDraft = { type: 'rename-layer', nodeId, name: 'Ink' };
+await doc.dispatch(draft);
+```
+
+`apply` must not mutate its input and must give the same result everywhere. When an operation depends on the
+environment, add an async `prepare(draft, context)`: it runs once on the issuing client before sending and can embed
+the result into the draft. Rasterizing text layers works this way, so every peer receives the same pixels.

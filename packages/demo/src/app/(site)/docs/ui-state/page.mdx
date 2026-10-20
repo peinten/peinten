@@ -1,0 +1,159 @@
+export const metadata = { title: 'State for the UI · peinten docs' };
+
+# State for the UI
+
+Runtime, document and view each expose a synchronous `subscribe` and `getSnapshot` pair. Snapshots are plain
+immutable objects. Parts that did not change keep their identity, so you can select a slice without a selector
+library and your components skip unrelated updates.
+
+| Snapshot | Contents |
+|---|---|
+| `runtime.getSnapshot()` | Active tool with its options and UI state, brush resources |
+| `doc.getSnapshot()` | Layer tree with thumbnails, active layer, selection bounds, history flags, collaboration status and peers |
+| `view.getSnapshot()` | Viewport: center, zoom, rotation and horizontal flip |
+
+The worker build mirrors the latest snapshot on the main thread, so `getSnapshot` stays synchronous there too. Work
+is batched per frame, so a stroke does not flood your UI with notifications.
+
+All three implement the `SnapshotSource<T>` interface exported by `peinten`, so one small helper per framework
+covers them all.
+
+## React
+
+Define the hook once:
+
+```ts title="hooks/use-snapshot.ts"
+import type { SnapshotSource } from 'peinten';
+import { useSyncExternalStore } from 'react';
+
+/**
+ * Reads part of a peinten snapshot from a runtime, document or view. `select` must return a part of the snapshot or a
+ * primitive, never a new object, so that unchanged parts keep their identity and the component skips re-rendering.
+ */
+export function useSnapshot<T, S>(source: SnapshotSource<T>, select: (snapshot: T) => S): S {
+  const read = () => select(source.getSnapshot());
+  return useSyncExternalStore(source.subscribe, read, read);
+}
+```
+
+Then use it in components:
+
+```tsx title="undo-button.tsx"
+import type { PaintDocument } from 'peinten';
+import { useSnapshot } from './hooks/use-snapshot';
+
+export function UndoButton({ doc }: { doc: PaintDocument }) {
+  const canUndo = useSnapshot(doc, (s) => s.history.canUndo);
+  return <button disabled={!canUndo} onClick={() => doc.undo()}>Undo</button>;
+}
+```
+
+The tool snapshot is a union discriminated by `id`, so checking the id narrows options and UI state:
+
+```tsx title="apply-transform-button.tsx"
+import type { PaintRuntime } from 'peinten';
+import { useSnapshot } from './hooks/use-snapshot';
+import type { Tools } from './tools';
+
+export function ApplyTransformButton({ runtime }: { runtime: PaintRuntime<Tools> }) {
+  const tool = useSnapshot(runtime, (s) => s.tool);
+  if (tool.id !== 'transform') return null;
+  // tool.options is TransformOptions, tool.uiState is TransformUIState | undefined
+  return (
+    <button disabled={!tool.uiState?.active} onClick={() => runtime.runToolCommand('transform', 'commit')}>
+      Apply
+    </button>
+  );
+}
+```
+
+## Vue
+
+```ts title="composables/use-snapshot.ts"
+import type { SnapshotSource } from 'peinten';
+import { onScopeDispose, type ShallowRef, shallowRef } from 'vue';
+
+/** The latest snapshot of a runtime, document or view, replaced as a whole on every change. */
+export function useSnapshot<T>(source: SnapshotSource<T>): Readonly<ShallowRef<T>> {
+  const snapshot = shallowRef(source.getSnapshot());
+  onScopeDispose(source.subscribe(() => (snapshot.value = source.getSnapshot())));
+  return snapshot;
+}
+```
+
+```vue title="UndoButton.vue"
+<script setup lang="ts">
+import type { PaintDocument } from 'peinten';
+import { computed } from 'vue';
+import { useSnapshot } from './composables/use-snapshot';
+
+const props = defineProps<{ doc: PaintDocument }>();
+const snapshot = useSnapshot(props.doc);
+const canUndo = computed(() => snapshot.value.history.canUndo);
+</script>
+
+<template>
+  <button :disabled="!canUndo" @click="props.doc.undo()">Undo</button>
+</template>
+```
+
+## Svelte 5
+
+```ts title="snapshot.svelte.ts"
+import type { SnapshotSource } from 'peinten';
+
+/** The latest snapshot of a runtime, document or view as a reactive value. Call it during component initialisation. */
+export function snapshotOf<T>(source: SnapshotSource<T>): { readonly current: T } {
+  let snapshot = $state.raw(source.getSnapshot());
+  $effect(() => source.subscribe(() => (snapshot = source.getSnapshot())));
+  return {
+    get current() {
+      return snapshot;
+    },
+  };
+}
+```
+
+```svelte title="UndoButton.svelte"
+<script lang="ts">
+  import type { PaintDocument } from 'peinten';
+  import { snapshotOf } from './snapshot.svelte';
+
+  const { doc }: { doc: PaintDocument } = $props();
+  const snapshot = snapshotOf(doc);
+</script>
+
+<button disabled={!snapshot.current.history.canUndo} onclick={() => doc.undo()}>Undo</button>
+```
+
+## Solid
+
+```ts title="create-snapshot.ts"
+import type { SnapshotSource } from 'peinten';
+import { type Accessor, createSignal, onCleanup } from 'solid-js';
+
+/** The latest snapshot of a runtime, document or view as a signal. */
+export function createSnapshot<T>(source: SnapshotSource<T>): Accessor<T> {
+  const [snapshot, setSnapshot] = createSignal(source.getSnapshot());
+  onCleanup(source.subscribe(() => setSnapshot(() => source.getSnapshot())));
+  return snapshot;
+}
+```
+
+```tsx title="UndoButton.tsx"
+import type { PaintDocument } from 'peinten';
+import { createSnapshot } from './create-snapshot';
+
+export function UndoButton(props: { doc: PaintDocument }) {
+  const snapshot = createSnapshot(props.doc);
+  return <button disabled={!snapshot().history.canUndo} onClick={() => props.doc.undo()}>Undo</button>;
+}
+```
+
+## Thumbnails and peer cursors
+
+Layer thumbnails are `ImageBitmap`s with a `version` that changes with the bitmap, so you redraw only when needed.
+Peers in `doc.getSnapshot().collab.peers` carry cursor positions in document pixels. `documentToScreen(viewport, size)`
+returns the affine matrix from document pixels to canvas device pixels, where `size` is the canvas size in device
+pixels (`{ width: clientWidth * dpr, height: clientHeight * dpr, devicePixelRatio: dpr }`). Divide the result by
+`devicePixelRatio` to position DOM elements in CSS pixels.

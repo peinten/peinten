@@ -1,0 +1,85 @@
+export const metadata = { title: 'Saving and exporting · peinten docs' };
+
+# Saving and exporting
+
+## The .peinten format
+
+```ts
+const bytes = await doc.serialize();
+const reopened = await runtime.createDocument({ from: bytes });
+```
+
+Documents are CBOR, starting with the self-describe tag so files can be recognized. Tiles are stored as
+fix15 samples in typed-array byte order (little-endian on every platform peinten supports) and deflated one by one, so empty and flat tiles shrink to a few bytes. Loading validates
+the whole file, including that the layer tree is a proper tree, and throws on malformed input.
+
+Saved files contain the layer tree and pixels. They leave out history, selections and derived data such as text
+rasters, thumbnails and GPU caches. Collaboration snapshots use the same format plus every client's selection.
+
+## Export
+
+`doc.export` takes an exporter, a function that turns the document into a file. The built-in ones come from
+`peinten/exporting`:
+
+```ts
+import { jpegExporter, pngExporter, psdExporter } from 'peinten/exporting';
+
+const png = await doc.export(pngExporter());
+const jpeg = await doc.export(jpegExporter({ quality: 0.9, background: [1, 1, 1] }));
+const psd = await doc.export(psdExporter());
+```
+
+An app bundles only the exporters it imports. `psdExporter` brings ag-psd, roughly 280 KB minified, so import it only
+where PSD export is offered, or load it when the user exports:
+
+```ts
+const { psdExporter } = await import('peinten/exporting');
+const psd = await doc.export(psdExporter());
+```
+
+Exports render the committed document without previews or an unfinished stroke. Edits wait until the exporter
+finishes, so everything it reads comes from the same state. PNG and JPEG are encoded with `OffscreenCanvas`; JPEG is
+flattened onto `background` (white by default) at quality 0.92 unless set.
+
+With the worker build, exporters run on the main thread and read the document from the worker. Encoding PNG and JPEG
+is asynchronous, but PSD encoding blocks the main thread for a moment on large documents.
+
+### Custom exporters
+
+An exporter is any `(source: ExportSource) => Promise<Blob>`. `source` has the document's `width` and `height`,
+`composite()` for the rendered image and `layers()` for the layer tree; both read on demand, so an exporter that only
+needs the composite never converts layers. Images are straight 8-bit RGBA (`RasterImage`), and layer images carry
+their position (`PlacedImage`).
+
+```ts
+import type { Exporter } from 'peinten';
+
+/** Uncompressed RGBA, e.g. for a custom pipeline. */
+const rawExporter = (): Exporter => async (source) => {
+  const image = await source.composite();
+  return new Blob([image.data], { type: 'application/octet-stream' });
+};
+
+const raw = await doc.export(rawExporter());
+```
+
+`layers()` returns `ExportLayer`s: pixel layers, folders and text layers with their text data. File formats do not know
+peinten's filters, so a folder containing adjustment layers arrives as its rendered pixels, and the whole document
+arrives as one layer named "Merged" when the top level contains an adjustment layer.
+
+### PSD mapping
+
+PSD files are written with ag-psd, without a canvas.
+
+| peinten | PSD |
+|---|---|
+| Paint layer | Pixel layer trimmed to its content |
+| Folder | Group, pass-through when set |
+| Blend modes, opacity, visibility | Same |
+| Folder containing adjustment layers | One canvas-sized pixel layer with the folder's rendered result, because PSD has no blur adjustment |
+| Adjustment layer at the top level | The whole document as a single pixel layer named "Merged" |
+| Text layer | Text layer with styles and orientation, plus the rendered image |
+| Whole document | The composite image PSD requires |
+
+Font names are written as CSS families. Photoshop expects PostScript names and may substitute fonts; the rendered
+image keeps the look either way. Colors are 8 bits per channel.

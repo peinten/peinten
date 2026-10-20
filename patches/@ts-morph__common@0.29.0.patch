@@ -1,0 +1,13 @@
+diff --git a/dist/ts-morph-common.js b/dist/ts-morph-common.js
+index fd0d9bf0f53534a87fbd0f95eda920533aba83a2..c190faa8e90d84be810d1e5952b852edee1971c1 100644
+--- a/dist/ts-morph-common.js
++++ b/dist/ts-morph-common.js
+@@ -1,6 +1,7 @@
+ 'use strict';
+ 
+-var ts = require('./typescript');
++// Use the workspace `typescript` (typescript-native-bridge, backed by tsgo) instead of the bundled copy.
++var ts = require('typescript');
+ var minimatch = require('minimatch');
+ var path$1 = require('path-browserify');
+ var fs$1 = require('node:fs');

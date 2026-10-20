@@ -1,0 +1,65 @@
+import { FeatureGrid } from '@/features/landing/feature-grid';
+import { Hero } from '@/features/landing/hero';
+import { Section } from '@/features/landing/section';
+
+export const metadata = { title: 'peinten — raster painting engine for the web' };
+
+<Hero />
+
+<Section title="Features">
+
+<FeatureGrid />
+
+</Section>
+
+<Section title="A few lines to a canvas">
+
+Run the engine in a worker, open a document, attach a canvas. Input, tools, history and rendering are handled for you.
+
+```ts
+import { ops } from 'peinten';
+import { connectRuntime } from 'peinten/worker';
+import type { Tools } from './tools';
+
+const runtime = await connectRuntime<Tools>(new Worker(new URL('./engine.worker.ts', import.meta.url), { type: 'module' }));
+const doc = await runtime.createDocument({ width: 1600, height: 1200 });
+await runtime.createView({ canvas, document: doc });
+
+const layer = ops.addLayer({ name: 'Ink' });
+await doc.dispatch(layer);
+await doc.setActiveNode(layer.nodeId);
+await runtime.setTool('brush'); // the brush now paints on "Ink"
+```
+
+State comes from synchronous snapshots, so a hook is a few lines of `useSyncExternalStore`
+([see how](/docs/ui-state)):
+
+```tsx
+import type { PaintDocument } from 'peinten';
+import { useSnapshot } from './hooks/use-snapshot'; // the hook from "State for the UI"
+
+export function UndoButton({ doc }: { doc: PaintDocument }) {
+  const canUndo = useSnapshot(doc, (s) => s.history.canUndo);
+  return <button disabled={!canUndo} onClick={() => doc.undo()}>Undo</button>;
+}
+```
+
+</Section>
+
+<Section title="How it works">
+
+- **CPU tiles, GPU composite.** Dabs are computed on the CPU in libmypaint's fix15 format, so the pixels do not
+  depend on the GPU's floating-point precision. The GPU composites the layer stack, runs filters and previews
+  transforms.
+- **Operations, not pixels.** Every change is a deterministic operation. Most are small (a stroke is its input
+  samples); only imported images and rasterized text carry their pixels. Undo rolls back and replays the operations
+  after it; tiles are immutable, so rolling back only swaps references.
+- **Collaboration with a total order.** Pixel blending is not commutative, so concurrent strokes cannot be merged
+  like CRDT values. A sequencer decides one order instead. Strokes travel as input samples and are recomputed by each
+  peer; pixels travel only where they cannot be recomputed: imported images, rasterized text and snapshots for late
+  joiners.
+- **Off the main thread.** The whole engine runs in a Web Worker behind the same interface as the main-thread build.
+
+[Read the architecture →](/docs/architecture)
+
+</Section>

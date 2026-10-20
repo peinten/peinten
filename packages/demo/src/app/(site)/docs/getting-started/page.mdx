@@ -1,0 +1,123 @@
+export const metadata = { title: 'Getting started · peinten docs' };
+
+# Getting started
+
+## Install
+
+```sh
+npm install peinten
+```
+
+The package is ESM only and has five entry points:
+
+| Import | Contents |
+|---|---|
+| `peinten` | `createRuntime`, the `ops` factories, brushes, text helpers and the core types |
+| `peinten/worker` | `exposeRuntime` for the worker script and `connectRuntime` for the main thread |
+| `peinten/tools` | The built-in tools and their option, UI state and command types |
+| `peinten/collab` | Sequencer, transports and the collaboration types (`CollabTransport`, `CollabState`, `Peer`, `Presence`); free of DOM and GPU dependencies |
+| `peinten/exporting` | Exporters for PNG, JPEG and PSD; bundlers keep only the ones you import |
+
+## Requirements
+
+- A browser with WebGPU. `createRuntime` and `connectRuntime` reject when no adapter is available; the demo shows a
+  fallback message in that case.
+- For the worker setup, a bundler that understands `new Worker(new URL('./file', import.meta.url), { type: 'module' })`,
+  as Vite, webpack 5, Parcel and Next.js do.
+- TypeScript: the public types reference WebGPU types such as `GPUDevice`. Recent DOM libraries declare the WebGPU
+  interfaces but not constants such as `GPUBufferUsage`, which custom filter kernels use. When the compiler reports
+  missing WebGPU names, install `@webgpu/types` and add it to `compilerOptions.types`; if it then reports duplicate
+  declarations against the DOM library, enable `skipLibCheck`.
+- `peinten/collab` also runs in Node, for collaboration servers.
+
+## Choose your tools
+
+Tools are plain objects that implement `ITool`. The built-in ones come from `peinten/tools`. Create them in one
+function and export its type; the tuple type gives typed tool ids, options and UI state everywhere else.
+
+```ts title="tools.ts"
+import { BrushTool, PanTool, ShapeSelectTool, TextTool, TransformTool, ZoomTool } from 'peinten/tools';
+
+export const createTools = () =>
+  [
+    new BrushTool(),
+    new BrushTool({ id: 'eraser', eraser: true }),
+    new ShapeSelectTool<'select-rect'>('rect'),
+    new TransformTool(),
+    new TextTool(),
+    new PanTool(),
+    new ZoomTool(),
+  ] as const;
+
+export type Tools = ReturnType<typeof createTools>;
+```
+
+## Run the engine in a worker
+
+This is the recommended setup: brush dabs are computed on the CPU, and in a worker they never compete with your UI
+for the main thread. The worker creates the tools; the main thread only uses their type.
+
+```ts title="engine.worker.ts"
+import { exposeRuntime } from 'peinten/worker';
+import { createTools } from './tools';
+
+exposeRuntime({ tools: createTools() });
+```
+
+```ts title="main.ts"
+import { connectRuntime } from 'peinten/worker';
+import type { Tools } from './tools';
+
+const runtime = await connectRuntime<Tools>(
+  new Worker(new URL('./engine.worker.ts', import.meta.url), { type: 'module' }),
+);
+```
+
+Canvases are handed to the worker with `transferControlToOffscreen`. Pointer, key and wheel input is captured on the
+main thread and forwarded, including coalesced pen samples. Passing the same canvas to `createView` again reuses
+the transferred surface, which keeps React StrictMode working.
+
+## Or on the main thread
+
+```ts
+import { createRuntime } from 'peinten';
+
+const runtime = await createRuntime({ tools: createTools() });
+```
+
+`createRuntime` and `exposeRuntime` take the same options, except `clientId`:
+
+| Option | Default | Purpose |
+|---|---|---|
+| `tools` | required | The tools the runtime can activate |
+| `gpu` | `navigator.gpu` | WebGPU entry point, e.g. from the `webgpu` package in Node tests |
+| `colorMixer` | libmypaint 2.0 spectral mixer | Pigment mixing for brushes |
+| `textEngine` | `CanvasTextEngine` | Text layout and rendering |
+| `operations` | none | Custom operations, see [Editing](/docs/editing) |
+| `filters` | none | Custom filters, see [Filters](/docs/filters) |
+| `onError` | `console.error` | Errors from background work such as skipped batches |
+| `clientId` | random id | Identity in collaboration and the key of this client's selection; `createRuntime` only, with a worker pass it to `connectRuntime(worker, { clientId })` |
+
+## Open a document and a view
+
+```ts
+const doc = await runtime.createDocument({ width: 1600, height: 1200 });
+const view = await runtime.createView({ canvas, document: doc });
+
+await runtime.setTool('brush');
+await runtime.setResources({ color: [0.9, 0.2, 0.1], size: 24 });
+```
+
+The engine is split into three objects:
+
+| Object | One per | Owns |
+|---|---|---|
+| `PaintRuntime` | page | GPU device, pipelines, tools, brush resources |
+| `PaintDocument` | document | state, history, collaboration session, GPU caches |
+| `PaintView` | canvas | canvas context, viewport, overlay, input |
+
+A view follows its canvas size and `devicePixelRatio` automatically. With `input: true`, the default, it routes
+input to the active tool and handles navigation: the wheel pans, Ctrl or Cmd with the wheel zooms, and Space or
+middle-button drags pan. Application shortcuts such as undo are yours to bind.
+
+`createView` also takes `background`: `'checker'` (default), `'transparent'` or an RGB triple.

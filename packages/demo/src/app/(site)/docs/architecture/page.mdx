@@ -1,0 +1,59 @@
+export const metadata = { title: 'Architecture · peinten docs' };
+
+# Architecture
+
+## Layers
+
+```
+src/
+  domain/          pure model and rules: tiles, document, operations, history, brush engine, raster, text
+  application/     use cases and ports: runtime, document, view, tool contract, collaboration, export
+  infrastructure/  port implementations: WebGPU, Canvas2D text, file codec, exporters, input, worker bridge, transports
+  tools/           ITool implementations; they see the engine only through ToolContext
+  index.ts, worker.ts, tools.ts, collab.ts, exporting.ts
+                   entry points: peinten, peinten/worker, peinten/tools, peinten/collab, peinten/exporting
+```
+
+Dependencies point inward only. Biome's `noRestrictedImports` enforces this for `domain`, `application`, `tools` and
+`infrastructure`; only the entry points may import every layer. `domain` is also type-checked without DOM or WebGPU
+types. Where the domain needs the outside world, it defines a port and receives an
+implementation: `FilterExecutor` for GPU filters, `ColorMixer` for pigment mixing, `TextRasterizer` for text.
+
+## Pixels and state
+
+Pixels are premultiplied RGBA in libmypaint's fix15 format (`1 << 15` is 1.0), in 64 × 64 tiles of `Uint16Array`.
+Selections use single-channel tiles of the same size, so the dab code can paint into either.
+
+Committed tiles are immutable. A stroke copies a tile the first time it touches it and writes into the copy.
+Comparing tile references is enough to find what changed, which drives GPU uploads and thumbnails. History keeps
+whole immutable states, so rolling back only swaps references.
+
+The document state is an immutable value updated only by applying operations. While a stroke is in progress, its
+working tiles live in a separate `StrokeSession` and shadow the committed tiles on screen; the state changes once,
+when the stroke commits. Strokes that collaborators are still drawing are replayed into working tiles of their own,
+which shadow the committed tiles the same way.
+
+## Rendering
+
+| Owner | GPU resources |
+|---|---|
+| Runtime | Device and the compute pipelines for compositing, filters, mips and warp previews |
+| Document | Tile atlas (`rgba16uint` texture array), selection texture, composite with mips, adjustment intermediates, warp preview |
+| View | Canvas context, display and overlay render pipelines, sampler, viewport uniforms, overlay vertices |
+
+The layer tree is flattened on the CPU into a small stack program: push a group, blend a layer, pop. A compute
+shader runs it per dirty tile into an `rgba16float` composite. Adjustment layers split the program into stages with
+the filter pass in between. The display pass draws the composite through the viewport transform with a checkerboard,
+marching ants or the quick mask tint, then the tools' vector overlay.
+
+## History and ordering
+
+The timeline keeps batches with the state before and after each one. Confirmed batches form a prefix in sequencer
+order; pending local batches follow. When something lands in the middle (a peer commit, an undo, a rejected batch),
+the timeline rolls back to the earliest affected entry and replays the rest. Undo is a `set-op-enabled` operation,
+so it travels to collaborators like any other edit.
+
+## Worker bridge
+
+`peinten/worker` uses comlink. Snapshots arrive as whole objects and are merged into the previous ones on the main
+thread to keep the identity of unchanged parts. Canvases are transferred once and reused by id.

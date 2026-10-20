@@ -1,0 +1,266 @@
+import { MermaidDiagram } from '@/features/docs/mermaid-diagram';
+
+export const metadata = { title: 'Collaboration · peinten docs' };
+
+# Collaboration
+
+Two roles exist:
+
+- **Clients** run the engine. Local edits apply immediately and stay pending until confirmed; peer commits are
+  inserted before them by rolling back and replaying.
+- **The sequencer** only assigns the order of commits. It never applies operations, so it needs neither the engine
+  nor a GPU.
+
+Strokes travel as input samples with a seed and are recomputed on every peer. Tile pixels travel only where they
+cannot be recomputed: imported images (`put-tiles`), rasterized text (`rasterize-node`) and snapshots for late
+joiners. Undo is a `set-op-enabled` operation that travels like any other edit; each client keeps
+its own undo stack, so a user undoes only their own edits.
+
+## Between tabs
+
+```ts
+import { broadcastChannelTransport } from 'peinten/collab';
+
+await doc.collab.connect(broadcastChannelTransport({ room: 'my-room', registry: runtime.registry }));
+await doc.collab.setPresence({ name: 'Otter', color: '#4cc' });
+```
+
+The tab holding a Web Lock runs the sequencer. When it closes, the next tab takes over and continues the log.
+Cursors follow each client's pointer automatically and appear in `doc.getSnapshot().collab.peers`.
+
+## Strokes in progress
+
+Peers see a stroke while it is drawn, not only after it commits. A client painting on a layer relays the brush, the
+seed and its input samples about 30 times a second. The sequencer forwards them like cursors: without ordering or
+logging them. Each peer replays the samples on its own state with the same renderer as the `stroke` operation and
+shows the result over the layer, outside the document state and history. The commit replaces the preview when it
+arrives.
+
+- A preview is drawn on the receiving peer's current state. When that state differs from the one the stroke commits
+  onto, the preview can differ slightly; the commit corrects it.
+- Where two strokes in progress touch the same 64 px tile of one layer, that tile shows only one of them until it
+  commits: your own, or else the one that began first.
+- Quick-mask strokes are not relayed, because they paint the drawer's selection, which peers do not display.
+- A peer that joins during a stroke sees that stroke only after it commits.
+- A preview whose commit does not arrive within 10 seconds of the stroke's end, e.g. because the sequencer rejected
+  it, is dropped.
+
+<MermaidDiagram
+  label="Sequence diagram: a stroke in progress is relayed to a peer and replaced by its commit"
+  chart={`
+sequenceDiagram
+  participant A as Drawing client
+  participant S as Sequencer
+  participant B as Peer
+  A->>S: stroke begin (seed, layer, brush)
+  S->>B: stroke begin
+  B->>B: start a preview
+  loop about 30 times a second
+    A->>S: stroke samples
+    S->>B: stroke samples
+    B->>B: replay the samples into the preview
+  end
+  A->>S: stroke end
+  S->>B: stroke end
+  A->>S: submit (stroke operation with the seed)
+  S->>B: commit
+  B->>B: apply the commit and drop the preview
+`}
+/>
+
+## With a WebSocket server
+
+The server only needs `peinten/collab`. `registry` must equal `runtime.registry` of the clients; it is a hash of the
+registered operations, filters and color mixer, and clients with a different build are refused. It changes only when
+those change, so read it once from a client (`console.log(runtime.registry)`) and pass it to the server, here through
+an environment variable: `PEINTEN_REGISTRY=<hash> node server.ts`.
+
+This server holds one sequencer and therefore one shared document. For several documents, keep one `Sequencer` per
+room and route each connection to the sequencer of its room.
+
+```ts title="server.ts"
+import { WebSocketServer } from 'ws';
+import { coreOperations, decodeMessage, encodeMessage, OperationRegistry, Sequencer } from 'peinten/collab';
+
+const sequencer = new Sequencer({
+  registry: process.env.PEINTEN_REGISTRY!,
+  operations: new OperationRegistry(coreOperations), // validates payloads; include your custom operations too
+});
+
+new WebSocketServer({ port: 8080 }).on('connection', (socket) => {
+  const peer = sequencer.connect({
+    send: (message) => socket.send(encodeMessage(message)),
+    close: () => socket.close(),
+  });
+  socket.on('message', (data) => peer.receive(decodeMessage(new Uint8Array(data as Buffer))));
+  socket.on('close', () => peer.disconnect());
+});
+```
+
+On the client, implement `CollabTransport`. The engine says hello again and resends unconfirmed edits whenever the
+status becomes `open`, so reconnecting is just opening a new socket.
+
+```ts title="web-socket-transport.ts"
+import type { CollabTransport, ServerMessage, TransportStatus } from 'peinten/collab';
+import { decodeMessage, encodeMessage } from 'peinten/collab';
+
+export function webSocketTransport(url: string): CollabTransport {
+  const listeners = new Set<(message: ServerMessage) => void>();
+  const statusListeners = new Set<(status: TransportStatus) => void>();
+  let status: TransportStatus = 'connecting';
+  let socket: WebSocket;
+  let closed = false;
+
+  const setStatus = (next: TransportStatus) => {
+    status = next;
+    for (const listener of statusListeners) listener(next);
+  };
+  const open = () => {
+    socket = new WebSocket(url);
+    socket.binaryType = 'arraybuffer';
+    socket.onopen = () => setStatus('open');
+    socket.onmessage = (event) => {
+      const message = decodeMessage(new Uint8Array(event.data)) as ServerMessage;
+      for (const listener of listeners) listener(message);
+    };
+    socket.onclose = () => {
+      if (closed) return;
+      setStatus('connecting');
+      setTimeout(open, 1000);
+    };
+  };
+  open();
+
+  return {
+    send: (message) => socket.readyState === WebSocket.OPEN && socket.send(encodeMessage(message)),
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    subscribeStatus(listener) {
+      statusListeners.add(listener);
+      listener(status);
+      return () => statusListeners.delete(listener);
+    },
+    close() {
+      closed = true;
+      socket.close();
+      setStatus('closed');
+    },
+  };
+}
+```
+
+Connect a document to the server with it:
+
+```ts title="main.ts"
+import { webSocketTransport } from './web-socket-transport';
+
+await doc.collab.connect(webSocketTransport('ws://localhost:8080'));
+await doc.collab.setPresence({ name: 'Otter', color: '#4cc' });
+
+// Leaving keeps the document. Edits the server has not confirmed yet stay as local history.
+await doc.collab.disconnect();
+```
+
+With the worker build, the transport stays on the main thread; `doc.collab.connect` relays it to the worker through
+a `MessageChannel`, so WebSockets and vendor SDKs work unchanged.
+
+## Message flow
+
+Each client talks to the sequencer through its `CollabTransport`. On the sequencer's side, every connection is a
+`PeerLink` passed to `sequencer.connect`, which returns the `receive` function for that client's messages. The
+transport and the link only move messages; ordering, validation and deduplication happen in the sequencer.
+
+An edit is applied locally first and confirmed by the commit that comes back:
+
+<MermaidDiagram
+  label="Sequence diagram: an edit travels from client A through its transport to the sequencer and back to both clients"
+  chart={`
+sequenceDiagram
+  participant A as Client A
+  participant TA as CollabTransport A
+  participant S as Sequencer
+  participant TB as CollabTransport B
+  participant B as Client B
+  A->>A: apply the batch and keep it pending
+  A->>TA: send(submit)
+  TA->>S: peer.receive(submit)
+  S->>S: validate, dedupe, append to the CommitLog as seq n
+  S->>TA: PeerLink.send(commit n)
+  S->>TB: PeerLink.send(commit n)
+  TA->>A: commit n
+  A->>A: confirm the pending batch
+  TB->>B: commit n
+  B->>B: roll back pending batches, apply, replay them
+`}
+/>
+
+The following diagrams leave the transports out. A client says hello whenever its transport's status becomes `open`.
+The sequencer answers with the commits the client is missing, or with a snapshot when its log no longer has them:
+
+<MermaidDiagram
+  label="Sequence diagram: a client joins, receives commits or a snapshot, and resends its pending batches"
+  chart={`
+sequenceDiagram
+  participant C as Joining client
+  participant S as Sequencer
+  participant P as Connected client
+  C->>S: hello (clientId, registry, since)
+  alt the log still has the commits after since
+    S->>C: welcome (commits)
+  else another client is connected
+    S->>P: snapshot-request
+    P->>S: snapshot (seq, data)
+    S->>C: welcome (snapshot, commits after it)
+  else
+    S->>C: welcome (stored snapshot, commits after it)
+  end
+  S->>C: presence of the others
+  C->>S: submit for each pending batch
+  C->>S: presence
+`}
+/>
+
+In an empty room, the sequencer asks the joining client itself for a snapshot, so its document becomes the base.
+
+A lost connection needs no special handling. The client keeps editing while the transport reconnects, then says
+hello with the last seq it applied and resends every batch that is still pending. The sequencer skips batches it
+has already committed, recognized by `clientId` and batch id, so resending is always safe:
+
+<MermaidDiagram
+  label="Sequence diagram: a client reconnects, catches up and resends pending batches, which the sequencer dedupes"
+  chart={`
+sequenceDiagram
+  participant C as Client
+  participant T as CollabTransport
+  participant S as Sequencer
+  C->>T: send(submit b1)
+  Note over T: the connection drops before or after b1 arrives
+  T-->>C: status connecting
+  C->>C: edit offline, b2 stays pending
+  T-->>C: status open
+  C->>S: hello (since: last applied seq)
+  S->>C: welcome (missing commits, b1 among them if it arrived)
+  C->>S: submit every batch still pending
+  S->>S: skip batches already committed
+  S->>C: commit b2
+`}
+/>
+
+## Persistence and joining
+
+`Sequencer` keeps commits in a `MemoryCommitLog` by default. Implement `CommitLog` to store them elsewhere. A client
+joining with no usable history receives a snapshot: the latest stored one, or a fresh one requested from a connected
+participant. Every `snapshotInterval` commits (200 by default) a participant is asked for a snapshot so older commits
+can be dropped. All participants must share the document size.
+
+`createInMemoryHub` wires a sequencer to in-memory transports for tests; `settle(random)` delivers messages in a
+random interleaving to check convergence.
+
+## Determinism
+
+Operations are recomputed on every peer, so they must be deterministic: brush randomness is seeded, stroke samples
+are quantized to float32, and filters use integer arithmetic. Text rendering depends on the platform's fonts, which is why
+rasterizing text embeds the pixels in the operation. Results of `Math.sin` and similar functions could in theory
+differ between JavaScript engines; peinten does not guard against that.

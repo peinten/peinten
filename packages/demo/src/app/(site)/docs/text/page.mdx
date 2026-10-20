@@ -1,0 +1,57 @@
+export const metadata = { title: 'Text layers · peinten docs' };
+
+# Text layers
+
+Text layers store styled text, not pixels. The engine renders them on demand and keeps the result as derived data.
+
+## Data
+
+```ts
+interface TextLayerData {
+  transform: Affine2D;                         // text space to document pixels, kept non-destructively
+  frame: { kind: 'point' } | { kind: 'area'; width: number; height: number };
+  writingMode: 'horizontal-tb' | 'vertical-rl';
+  paragraph: { align: 'start' | 'center' | 'end'; lineHeight: number };
+  runs: readonly TextRun[];                    // { text, style } with font, size, weight, italic, color, spacing
+}
+```
+
+Point text grows with its content; area text wraps inside its frame. Vertical writing keeps CJK characters upright,
+rotates other text, and moves the punctuation marks 、。，． to the upper right of their cell. Other full-width
+marks, such as brackets and the long vowel mark, are drawn upright without vertical forms.
+
+## Creating and editing
+
+```ts
+import { applyStyle, ops, plainText, replaceText } from 'peinten';
+
+const text = ops.addTextLayer({ text: { writingMode: 'vertical-rl' } });
+await doc.dispatch(text);
+
+const { runs } = doc.getSnapshot().nodes[text.nodeId]!.text!;
+const edited = replaceText(runs, 0, plainText(runs).length, 'こんにちは');
+await doc.dispatch(ops.updateText({ nodeId: text.nodeId, text: { runs: applyStyle(edited, 0, 2, { fontWeight: 700 }) } }));
+```
+
+`replaceText(runs, start, end, text)` and `applyStyle(runs, start, end, patch)` work on UTF-16 ranges and merge
+neighbouring runs with equal styles, so any UI can edit rich text without a dependency on a framework. The
+`TextTool` creates layers on the canvas: click for point text, drag for area text, click existing text to select it.
+
+## Rendering
+
+The default `CanvasTextEngine` measures and draws with Canvas2D through `OffscreenCanvas`, so it works on whichever
+thread hosts the runtime, the worker included. The
+`TextEngine` interface separates layout (glyph positions and bounds) from rasterization, the same split fontkit uses,
+so a fontkit-based engine can replace it:
+
+```ts
+interface TextEngine {
+  readonly id: string;
+  layout(text: TextLayerData): Promise<TextLayout>;
+  rasterize(text: TextLayerData, layout: TextLayout, transform: Affine2D): TextRasterImage | null;
+}
+```
+
+Canvas text differs slightly between platforms. That is accepted for display, but operations that read text pixels
+embed them: `rasterizeNode` renders on the issuing client and sends the tiles, and the magic wand only samples paint
+layers. Brushes cannot paint on text layers; rasterize first.

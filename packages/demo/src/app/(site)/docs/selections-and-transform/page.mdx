@@ -1,0 +1,59 @@
+export const metadata = { title: 'Selections and transform · peinten docs' };
+
+# Selections and transform
+
+## Selections
+
+Each client has its own selection, stored in the document as a coverage mask in 64 px tiles. In collaboration,
+other users' selections clip their strokes the same way on every peer.
+
+| Tool | How it selects |
+|---|---|
+| `select-rect`, `select-ellipse` | Drag a shape. Shift during the drag constrains it to a square or circle, except when the tool's mode is `add` |
+| `select-lasso` | Drag a freehand path |
+| `select-polygon` | Click vertices. Close it on the first vertex, by double-clicking or with Enter; Escape cancels, Backspace removes the last vertex |
+| `select-wand` | Click a color on the active paint layer; `tolerance` and `contiguous` refine it |
+
+The tool option `mode` (`replace`, `add`, `subtract`, `intersect`) sets how a new shape combines with the existing
+selection. Modifiers override it while held: Shift adds, Alt subtracts, both intersect.
+
+### Moving the outline
+
+In replace mode, dragging from a point at least half covered by the selection moves its outline by whole pixels. The
+pixels stay where they are. A click without dragging behaves as the tool normally does. Moving is unavailable in
+quick mask mode.
+
+From code:
+
+```ts
+await doc.dispatch(ops.selectShape({ mode: 'replace', shape: { kind: 'ellipse', cx: 400, cy: 300, rx: 120, ry: 80 } }));
+await doc.dispatch(ops.moveSelection({ dx: 40, dy: -10 }));
+await doc.dispatch([ops.invertSelection()]);
+```
+
+Strokes, filters and transforms are clipped to the selection of the client that issues them.
+
+### Quick mask
+
+`doc.setQuickMask(true)` tints the unselected area red and makes the brush paint into the selection instead of the
+active layer. Erasing removes from the selection.
+
+## Transform
+
+The transform tool works on the active layer, which must be an unlocked paint or text layer. On a paint layer it
+transforms the selected area (or the whole content when nothing is selected) and moves the selection with it. On a
+text layer the affine mode transforms the whole text and leaves the selection alone; perspective and mesh first
+rasterize the text, and the warp is then clipped to the selection and moves it, as on a paint layer.
+
+| Mode | Handles |
+|---|---|
+| `affine` | Drag inside to move. Corners scale both axes (Shift keeps proportions), edges scale one axis (Ctrl on the top or bottom edge shears). Drag outside to rotate (Shift snaps to 15°). Commands `flip-x` and `flip-y` |
+| `perspective` | Drag the four corners freely, or drag inside to move the whole quad |
+| `mesh` | `meshSize` is the number of cells per side, giving (`meshSize` + 1)² control points. Drag a control point, or elsewhere to move the whole grid; the warp is interpolated with a Catmull-Rom surface |
+
+While you drag, the GPU draws a live preview in place of the layer, keeping layer order and blend modes. `commit`
+(or Enter) applies it; `cancel` (or Escape) drops it. The committed result is resampled on the CPU, so it does not
+depend on the GPU that showed the preview.
+
+Text layers stay editable under affine transforms: the tool updates the layer's matrix and the text is rendered
+again. Perspective and mesh transforms first rasterize the text into a paint layer, in the same undo step.

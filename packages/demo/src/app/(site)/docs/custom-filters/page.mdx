@@ -1,0 +1,206 @@
+export const metadata = { title: 'Custom filters · peinten docs' };
+
+# Custom filters
+
+A filter has two halves. The **definition** (type, parameter schema, margin) is all the document needs: it validates
+parameters received from files and peers and knows how far a change spreads. The **kernel** is the WebGPU code that
+computes the pixels. `defineFilter` joins the two, and the runtime runs the kernel both for `applyFilter` and for
+adjustment layers, so a new filter gets live preview, destructive application and non-destructive adjustment layers
+at once.
+
+The example below inverts colors, with an `amount` that blends the result with the original.
+
+## 1. Declare the parameters
+
+Filter specs are a union typed by `FilterParamsMap`. Extend it with declaration merging so `{ type: 'invert', amount }`
+type-checks everywhere a filter is accepted:
+
+```ts title="invert-filter.ts"
+declare module 'peinten' {
+  interface FilterParamsMap {
+    invert: { readonly amount: number };
+  }
+}
+```
+
+## 2. Write the kernel
+
+Inputs and outputs are `rgba16uint` textures holding premultiplied pixels in fix15 (`32768` is 1.0). The kernel
+writes every pixel of `region`, reads the source through `inputOffset`, and blends its result with the original by
+the selection `mask` when there is one.
+
+```ts title="invert-filter.ts"
+const INVERT_WGSL = /* wgsl */ `
+struct Params {
+  region: vec4i,
+  inputOffset: vec2i,
+  inputSize: vec2i,
+  outputOffset: vec2i,
+  maskOffset: vec2i,
+  maskSize: vec2i,
+  amount: u32,
+  useMask: u32,
+}
+
+@group(0) @binding(0) var src: texture_2d<u32>;
+@group(0) @binding(1) var dst: texture_storage_2d<rgba16uint, write>;
+@group(0) @binding(2) var mask: texture_2d<u32>;
+@group(0) @binding(3) var<uniform> p: Params;
+
+fn inside(t: vec2i, size: vec2i) -> bool {
+  return t.x >= 0 && t.y >= 0 && t.x < size.x && t.y < size.y;
+}
+
+@compute @workgroup_size(16, 16)
+fn main(@builtin(global_invocation_id) g: vec3u) {
+  if (i32(g.x) >= p.region.z || i32(g.y) >= p.region.w) { return; }
+  let doc = p.region.xy + vec2i(g.xy);
+  let t = doc - p.inputOffset;
+  var c = vec4u(0u);
+  if (inside(t, p.inputSize)) { c = textureLoad(src, t, 0); }
+  // Pixels are premultiplied, so the inverse of a color is alpha minus the color.
+  let inverted = vec4u(vec3u(c.a) - c.rgb, c.a);
+  var weight = p.amount;
+  if (p.useMask != 0u) {
+    let m = doc - p.maskOffset;
+    var coverage = 0u;
+    if (inside(m, p.maskSize)) { coverage = textureLoad(mask, m, 0).r; }
+    weight = (weight * coverage + 16384u) >> 15u;
+  }
+  let result = (inverted * weight + c * (32768u - weight) + vec4u(16384u)) >> vec4u(15u);
+  textureStore(dst, doc - p.outputOffset, result);
+}
+`;
+```
+
+The TypeScript side creates the pipeline once and encodes one compute pass per invocation. It uses the
+`GPUBufferUsage` and `GPUTextureUsage` constants; see the TypeScript note in
+[Getting started](/docs/getting-started) if the compiler cannot find them.
+
+```ts title="invert-filter.ts"
+import type { FilterKernel } from 'peinten';
+
+export function createInvertKernel(device: GPUDevice): FilterKernel {
+  const module = device.createShaderModule({ label: 'invert', code: INVERT_WGSL });
+  const pipeline = device.createComputePipeline({
+    label: 'invert',
+    layout: 'auto',
+    compute: { module, entryPoint: 'main' },
+  });
+  // Bind groups need every binding, so passes without a selection bind this empty mask.
+  const noMask = device.createTexture({ size: [1, 1], format: 'r16uint', usage: GPUTextureUsage.TEXTURE_BINDING });
+  return {
+    type: 'invert',
+    encode(encoder, args) {
+      if (args.filter.type !== 'invert') throw new Error(`Unexpected filter ${args.filter.type}`);
+      const { region, inputOffset, inputSize, outputOffset, mask } = args;
+      const params = Int32Array.of(
+        region.x,
+        region.y,
+        region.width,
+        region.height,
+        inputOffset[0],
+        inputOffset[1],
+        inputSize[0],
+        inputSize[1],
+        outputOffset[0],
+        outputOffset[1],
+        mask?.offset[0] ?? 0,
+        mask?.offset[1] ?? 0,
+        mask?.size[0] ?? 0,
+        mask?.size[1] ?? 0,
+        // fix15, rounded the same way on every peer
+        Math.round(args.filter.amount * 32768),
+        mask ? 1 : 0,
+      );
+      const uniforms = device.createBuffer({
+        size: params.byteLength,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+      device.queue.writeBuffer(uniforms, 0, params);
+      args.transients.push(uniforms);
+      const pass = encoder.beginComputePass({ label: 'invert' });
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(
+        0,
+        device.createBindGroup({
+          layout: pipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: args.input },
+            { binding: 1, resource: args.output },
+            { binding: 2, resource: mask?.view ?? noMask.createView() },
+            { binding: 3, resource: { buffer: uniforms } },
+          ],
+        }),
+      );
+      pass.dispatchWorkgroups(Math.ceil(region.width / 16), Math.ceil(region.height / 16));
+      pass.end();
+    },
+    dispose() {
+      noMask.destroy();
+    },
+  };
+}
+```
+
+| `FilterKernelArgs` field | Meaning |
+|---|---|
+| `filter` | The validated filter spec, narrowed by `filter.type` |
+| `input`, `inputOffset`, `inputSize` | Source texture; texel = document position − `inputOffset` |
+| `output`, `outputOffset` | Storage texture to write; texel = document position − `outputOffset` |
+| `region` | The output pixels to compute, in document coordinates |
+| `bounds` | Document bounds; pixels outside read as transparent |
+| `mask` | Optional `r16uint` selection coverage to blend with, or `null` |
+| `transients` | Push buffers created for this call; they are destroyed once the GPU work completes |
+
+Kernels that read neighbouring pixels (blurs, convolutions) receive enough input around `region` as long as `margin`
+reports their reach, and must treat texels outside `inputSize` or `bounds` as transparent.
+
+## 3. Define and register
+
+```ts title="invert-filter.ts"
+import * as v from 'valibot';
+import { defineFilter } from 'peinten';
+
+export const invertFilter = defineFilter({
+  type: 'invert',
+  schema: v.object({ amount: v.pipe(v.number(), v.minValue(0), v.maxValue(1)) }),
+  // Each output pixel depends only on the same input pixel.
+  margin: () => 0,
+  createKernel: createInvertKernel,
+});
+```
+
+Pass it to the runtime. With the worker build, register it in the worker script, where the GPU lives:
+
+```ts title="engine.worker.ts"
+import { exposeRuntime } from 'peinten/worker';
+import { invertFilter } from './invert-filter';
+import { createTools } from './tools';
+
+exposeRuntime({ tools: createTools(), filters: [invertFilter] });
+```
+
+## 4. Use it
+
+```ts
+const invert = { type: 'invert', amount: 1 } as const;
+
+await doc.setFilterPreview({ nodeId, filter: invert });
+await doc.dispatch(ops.applyFilter({ nodeId, filter: invert }));
+await doc.dispatch(ops.addAdjustmentLayer({ filter: { type: 'invert', amount: 0.5 } }));
+```
+
+## Rules for kernels
+
+- **Integer math only.** Each collaborator recomputes `apply-filter` on its own GPU. Integer arithmetic is exact,
+  while floating-point precision differs between GPUs, so only integer kernels give every peer the same pixels.
+  Convert parameters to integers on the CPU with operations that round identically everywhere, as the example does
+  with `Math.round(amount * 32768)`; avoid `Math.exp` and similar functions, whose results may differ between
+  JavaScript engines.
+- **Stay premultiplied.** Pixels arrive premultiplied; computing on them directly keeps transparent areas from
+  bleeding color.
+- **Respect the mask.** Blend the result with the original by the mask coverage, so filters stay inside the
+  selection.
+- **Same registry everywhere.** The filter type is part of the runtime's registry hash, so every collaborator must
+  register the same filters.

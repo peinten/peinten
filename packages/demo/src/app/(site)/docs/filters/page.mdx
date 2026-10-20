@@ -1,0 +1,46 @@
+export const metadata = { title: 'Filters and adjustment layers · peinten docs' };
+
+# Filters and adjustment layers
+
+Filters are WGSL compute kernels. The same kernel serves two purposes: applying a filter to a layer's pixels, and
+adjustment layers that filter non-destructively. Both paths therefore produce identical pixels.
+
+Gaussian blur is built in.
+
+## Applying a filter
+
+```ts
+const blur = { type: 'gaussian-blur', radius: 8 } as const;
+
+await doc.setFilterPreview({ nodeId, filter: blur }); // shown live, not in history
+await doc.dispatch(ops.applyFilter({ nodeId, filter: blur }));
+await doc.setFilterPreview(null);
+```
+
+`applyFilter` runs on the GPU, reads the result back into tiles and is clipped to the issuer's selection. It is an
+asynchronous operation; the document applies operations one at a time, so ordering is kept.
+
+## Adjustment layers
+
+```ts
+const adjustment = ops.addAdjustmentLayer({ parentId: folderId, filter: blur });
+await doc.dispatch(adjustment);
+await doc.dispatch(ops.updateNode({ nodeId: adjustment.nodeId, props: { filter: { type: 'gaussian-blur', radius: 2 } } }));
+```
+
+An adjustment layer filters the composite of everything below it **in the same folder**, including sub-folders, and
+blends the result back with its own opacity and blend mode. The effect never leaks out of the folder. A folder
+containing adjustment layers is composited in isolation even when it is set to pass-through, which differs from
+Krita.
+
+## Determinism
+
+Kernels use integer arithmetic only. Integer operations are exact, while floating-point precision and rounding vary
+between GPUs, so the results are bit-identical everywhere. Each collaborator can therefore recompute `apply-filter`
+locally and the operation never has to carry pixels. The blur quantizes its weights to sum
+to `1 << 16` and accumulates in `u32`; it works on premultiplied pixels so transparent areas do not bleed color.
+
+## Your own filters
+
+Filters are registered at runtime creation, so an application can add kernels of its own. See
+[Custom filters](/docs/custom-filters).
