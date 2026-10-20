@@ -9,10 +9,15 @@ export const DOCS_NAV: readonly { readonly section: string; readonly pages: read
     section: 'Basics',
     pages: [
       { href: '/docs', title: 'Introduction' },
+      { href: '/docs/comparison', title: 'Compared with other libraries' },
       { href: '/docs/getting-started', title: 'Getting started' },
       { href: '/docs/ui-state', title: 'State for the UI' },
       { href: '/docs/editing', title: 'Editing documents' },
     ],
+  },
+  {
+    section: 'Guides',
+    pages: [{ href: '/docs/painting-on-images', title: 'Painting on images' }],
   },
   {
     section: 'Features',

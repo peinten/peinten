@@ -1,0 +1,100 @@
+export const metadata = {
+  title: 'Painting on images · peinten docs',
+  description: 'Let users paint on a photo or draw a mask over it, then export the result, with undo and pressure brushes.',
+};
+
+# Painting on images
+
+Many apps need a brush on top of an image: marking up a screenshot, retouching a photo, or painting the mask that an
+AI model should regenerate. This guide builds that with peinten: the image on one layer, the user's strokes on a
+layer above it, and an export of either. It assumes a runtime and tools set up as in
+[Getting started](/docs/getting-started).
+
+## Open the image
+
+Size the document to the image and import it as the bottom layer. Every new document starts with one empty layer,
+which becomes the layer the user paints on.
+
+```ts
+import { importImage, ops } from 'peinten';
+
+const photo = await createImageBitmap(file);
+const doc = await runtime.createDocument({ width: photo.width, height: photo.height });
+await runtime.createView({ canvas, document: doc });
+
+const paintLayer = doc.getSnapshot().rootIds[0]!;
+await doc.dispatch([
+  ...(await importImage(photo, { index: 0, name: 'Photo' })),
+  ops.updateNode({ nodeId: paintLayer, props: { name: 'Mask', opacity: 0.6 } }),
+]);
+await doc.setActiveNode(paintLayer);
+```
+
+The drafts in one `dispatch` form one undo step. Lowering the mask layer's opacity keeps the photo visible under it;
+it changes how the layer is shown, not the pixels it holds.
+
+## Paint and erase
+
+The brush paints on the active layer with the shared brush resources. A mask is usually painted in white and corrected
+with the eraser.
+
+```ts
+await runtime.setTool('brush');
+await runtime.setResources({ color: [1, 1, 1], size: 48 });
+
+// Toggle from a button or a shortcut:
+await runtime.setResources({ eraser: true });
+```
+
+The brushes respond to pen pressure and tilt, and `doc.undo()` takes back one stroke at a time. To start over, dispatch
+`ops.clear({ nodeId: paintLayer })`; it is undoable too. While a selection exists, strokes stay inside it, so users can
+lasso an area and paint over it freely. The [tools page](/docs/tools) lists the selection tools.
+
+## Export the strokes
+
+`doc.export` takes an exporter, a function that reads the document and returns a file. To get the painted layer on its
+own, at full size and without the photo, write a small one: `layers()` returns the layers from the bottom up, each with
+its pixels and their position.
+
+```ts
+import type { Exporter } from 'peinten';
+
+const maskExporter: Exporter = async (source) => {
+  const [, mask] = await source.layers();
+  const canvas = new OffscreenCanvas(source.width, source.height);
+  if (mask?.kind === 'pixels' && mask.image) {
+    const { x, y, width, height, data } = mask.image;
+    canvas.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(data), width, height), x, y);
+  }
+  return canvas.convertToBlob({ type: 'image/png' });
+};
+
+const maskPng = await doc.export(maskExporter);
+```
+
+The exported pixels ignore the layer's display opacity, so a white stroke comes out fully white on transparency. For
+the photo with the strokes merged, use `pngExporter()` or `jpegExporter()` from `peinten/exporting`, which render the
+document as shown; see [Saving and exporting](/docs/files).
+
+## Grow or crop the canvas
+
+To paint beyond the image's edges, for example to outpaint, resize the canvas. The offset places the old image on the
+new canvas, and the change is one undoable operation.
+
+```ts
+const { width, height } = doc.getSnapshot();
+await doc.dispatch(ops.resizeCanvas({ width: width + 256, height: height + 256, offsetX: 128, offsetY: 128 }));
+```
+
+[Editing documents](/docs/editing) covers cropping and how views follow the new size.
+
+## Show areas without painting them
+
+To highlight a region the user picked elsewhere in your UI, such as a box for a prompt, draw it over the view instead
+of into the document. It is never exported and stays visible whatever tool is active.
+
+```ts
+await view.setOverlay([{ kind: 'polygon', points: [x0, y0, x1, y0, x1, y1, x0, y1], fill: [0.3, 0.5, 1, 0.25] }]);
+```
+
+See [State for the UI](/docs/ui-state) for the shapes you can draw.

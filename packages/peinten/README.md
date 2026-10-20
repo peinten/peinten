@@ -1,6 +1,9 @@
 # peinten
 
-A raster painting engine in pure TypeScript.
+Real painting for your web app. Let users paint on images, draw masks and sketch with libmypaint brushes, with layers,
+selections, undo and live collaboration built in. You bring the UI. [Try the demo](https://peinten.vercel.app/demo).
+
+peinten is a raster painting engine in pure TypeScript.
 Pixels live in 64 px tiles on the CPU, brushes are a port of libmypaint, and WebGPU composites and displays the result.
 The engine is UI-framework agnostic and runs either on the main thread or in a Web Worker behind the same interface.
 

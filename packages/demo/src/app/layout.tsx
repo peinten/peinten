@@ -4,8 +4,11 @@ import { BRAND_BACKGROUND, SITE_DESCRIPTION } from '@/features/site/brand';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'peinten — raster painting engine for the web',
+  metadataBase: new URL('https://peinten.vercel.app'),
+  title: 'peinten — painting engine for web apps',
   description: SITE_DESCRIPTION,
+  openGraph: { type: 'website', siteName: 'peinten', description: SITE_DESCRIPTION },
+  twitter: { card: 'summary_large_image' },
   icons: {
     icon: [
       { url: '/favicon.ico', sizes: '16x16 32x32 48x48' },

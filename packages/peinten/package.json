@@ -1,7 +1,7 @@
 {
   "name": "peinten",
   "version": "1.2.1",
-  "description": "Tile-based raster painting engine with a libmypaint brush engine and WebGPU compositing",
+  "description": "Painting engine for web apps: libmypaint brushes, layers, masks, selections and undo, rendered with WebGPU",
   "license": "MIT",
   "homepage": "https://peinten.vercel.app",
   "repository": {
@@ -85,6 +85,14 @@
     "webgpu",
     "canvas",
     "drawing",
-    "collaboration"
+    "collaboration",
+    "paint",
+    "sketch",
+    "image-editor",
+    "annotation",
+    "mask",
+    "inpainting",
+    "layers",
+    "pressure"
   ]
 }

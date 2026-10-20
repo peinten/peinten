@@ -61,11 +61,11 @@ export function Hero() {
         />
         <p className="mb-4 text-sm font-medium tracking-wide text-accent">Pure TypeScript · WebGPU · libmypaint</p>
         <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-white sm:text-6xl">
-          A raster painting engine for the web
+          Real painting for your web app
         </h1>
         <p className="mt-6 max-w-2xl text-lg text-ink-200">
-          Layers, libmypaint brushes, selections, transforms, filters and text, with undo that also works when several
-          people paint on the same canvas. Bring your own UI.
+          Let users paint on images, draw masks and sketch with libmypaint brushes. Layers, selections, undo and live
+          collaboration come with the engine; you bring the UI.
         </p>
         <div className="mt-10 flex flex-wrap gap-3">
           <Link href="/demo" className="rounded-md bg-accent px-5 py-2.5 font-medium text-white hover:bg-accent/90">
@@ -76,6 +76,12 @@ export function Hero() {
             className="rounded-md border border-ink-700 px-5 py-2.5 font-medium text-ink-200 hover:border-ink-600 hover:text-white"
           >
             Get started
+          </Link>
+          <Link
+            href="/docs/painting-on-images"
+            className="rounded-md px-5 py-2.5 font-medium text-ink-200 hover:text-white"
+          >
+            Paint on images →
           </Link>
         </div>
       </div>

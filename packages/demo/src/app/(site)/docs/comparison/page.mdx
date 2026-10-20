@@ -1,0 +1,39 @@
+export const metadata = {
+  title: 'Compared with other libraries · peinten docs',
+  description: 'How peinten differs from Fabric.js, Konva, perfect-freehand, signature_pad, tldraw, Excalidraw and p5.brush.',
+};
+
+# Compared with other libraries
+
+Most JavaScript drawing libraries keep a list of shapes: a stroke is a path you can select and move later. peinten
+keeps pixels, like Photoshop or Krita: a stroke is painted into a layer by a brush engine and becomes part of the
+image. Which model fits depends on what your users make.
+
+| Library | What it is | Strokes are | Choose it for |
+|---|---|---|---|
+| peinten | Raster painting engine | Pixels painted by libmypaint brushes into layers | Painting, retouching, masks and markup on images |
+| [Fabric.js](https://fabricjs.com), [Konva](https://konvajs.org) | Object canvas | Path objects in a scene graph | Design editors, diagrams, movable shapes and text |
+| [perfect-freehand](https://github.com/steveruizok/perfect-freehand) | Stroke geometry | An outline polygon you render yourself | Smooth ink in your own renderer |
+| [signature_pad](https://github.com/szimek/signature_pad) | Signature capture | Lines on a single canvas | Capturing a signature |
+| [tldraw](https://tldraw.dev), [Excalidraw](https://excalidraw.com) | Whiteboards | Shapes on an infinite canvas | Diagrams and collaborative whiteboards |
+| [p5.brush](https://github.com/acamposuribe/p5.brush) | Brushes for p5.js | Marks drawn by code | Generative art |
+
+## When peinten fits
+
+- **Brushes that look painted.** Brushes come from libmypaint, the engine of MyPaint, and react to pressure, tilt,
+  speed and the colors already on the canvas. Smudging and pigment mixing blend paint, not paths.
+- **Working on images.** Imported images are layers like any other, so users can paint over them, paint masks for
+  them, select and transform parts of them, and export the layers separately. See
+  [Painting on images](/docs/painting-on-images).
+- **Editors that need history and layers.** Undo, layers with blend modes, selections, transforms, filters and text
+  are part of the engine, so your app supplies the UI only.
+- **Painting together.** Collaborators see each other's strokes while they are drawn, and every peer ends with the
+  same pixels.
+
+## When another library fits better
+
+- **Shapes stay editable.** If users expect to click a line later and change its color or move it, an object canvas
+  such as Fabric.js or Konva is the better model; a painted stroke has no identity once it is in the layer.
+- **A whiteboard.** For sticky notes, arrows and an infinite canvas, tldraw and Excalidraw do that out of the box.
+- **Just a signature or a few lines.** signature_pad or perfect-freehand are much smaller.
+- **No WebGPU.** peinten composites with WebGPU, so it needs a browser that supports it.

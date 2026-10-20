@@ -27,7 +27,7 @@ const EXTERNALLY_USED = [
   // Library entry points: their exports are the public API.
   /\/packages\/peinten\/src\/(index|worker|tools|collab|exporting|tiles)\.ts$/,
   // Files that Next.js, Vitest or a Worker constructor load by convention.
-  /\/src\/app\/(.*\/)?(page|layout|route|not-found|global-error|manifest)\.tsx?$/,
+  /\/src\/app\/(.*\/)?(page|layout|route|not-found|global-error|manifest|opengraph-image)\.tsx?$/,
   /\/src\/mdx-components\.tsx$/,
   /\/\.next\//,
   /\/vitest\.config\.ts$/,

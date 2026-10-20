@@ -2,9 +2,25 @@ import { FeatureGrid } from '@/features/landing/feature-grid';
 import { Hero } from '@/features/landing/hero';
 import { Section } from '@/features/landing/section';
 
-export const metadata = { title: 'peinten — raster painting engine for the web' };
+export const metadata = { title: 'peinten — painting engine for web apps' };
 
 <Hero />
+
+<Section title="Made for painting on images">
+
+Most drawing libraries keep strokes as paths. peinten paints them into pixels with a real brush engine, so it fits
+where the result is an image:
+
+- **Markup and retouching.** Users draw over screenshots and photos with pressure-sensitive brushes, erase, undo and
+  export the flattened image or the strokes alone.
+- **Masks for image models.** Paint inpainting masks over a picture, grow the canvas for outpainting, and export the
+  mask layer as a PNG at full size.
+- **Drawing and sketching apps.** Layers with blend modes, selections, transforms, filters and text cover what a
+  painting app needs, and several people can paint on one canvas.
+
+[Build it: painting on images →](/docs/painting-on-images) · [How peinten compares →](/docs/comparison)
+
+</Section>
 
 <Section title="Features">
 

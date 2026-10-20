@@ -5,8 +5,10 @@
   </picture>
 </p>
 
-A raster painting engine for the web, written in pure TypeScript: CPU tiles, a libmypaint brush port, WebGPU
-compositing, and an operation log that drives undo, the worker build and collaboration. It is UI-framework agnostic.
+Real painting for your web app: users paint on images, draw masks and sketch with libmypaint brushes, with layers,
+selections, undo and live collaboration built in. Under the hood it is a raster painting engine in pure TypeScript:
+CPU tiles, a libmypaint brush port, WebGPU compositing, and an operation log that drives undo, the worker build and
+collaboration. It is UI-framework agnostic.
 
 The site at [peinten.vercel.app](https://peinten.vercel.app) has the [documentation](https://peinten.vercel.app/docs)
 and a [demo editor](https://peinten.vercel.app/demo).
