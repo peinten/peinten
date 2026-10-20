@@ -121,4 +121,6 @@ A view follows its canvas size and `devicePixelRatio` automatically. With `input
 input to the active tool and handles navigation: the wheel pans, Ctrl or Cmd with the wheel zooms, and Space or
 middle-button drags pan. Application shortcuts such as undo are yours to bind.
 
-`createView` also takes `background`: `'checker'` (default), `'transparent'` or an RGB triple.
+`createView` also takes `background`, which shows through transparent parts of the document: `'checker'` (default),
+`'transparent'` or an RGB triple. Around the document the canvas stays transparent, so the color there is the canvas
+element's CSS background.

@@ -51,10 +51,8 @@ fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   var bg = vec4f(0.0);
   if (view.mode == 0u) { bg = select(vec4f(1.0, 1.0, 1.0, 1.0), vec4f(0.8, 0.8, 0.8, 1.0), check == 1); }
   if (view.mode == 2u) { bg = view.background; }
-  if (doc.x < 0.0 || doc.y < 0.0 || doc.x >= view.docSize.x || doc.y >= view.docSize.y) {
-    if (view.mode == 1u) { return vec4f(0.0); }
-    return vec4f(0.16, 0.16, 0.18, 1.0);
-  }
+  // Around the document the canvas stays transparent, so the element's CSS background shows through.
+  if (doc.x < 0.0 || doc.y < 0.0 || doc.x >= view.docSize.x || doc.y >= view.docSize.y) { return vec4f(0.0); }
   var c: vec4f;
   if (view.zoom >= 2.0) {
     c = textureLoad(composite, vec2i(floor(doc)), 0);

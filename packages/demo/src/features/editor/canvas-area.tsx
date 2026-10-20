@@ -28,7 +28,7 @@ export function CanvasArea() {
   }, [runtime, document, setView]);
 
   return (
-    <main className="relative row-start-2 min-h-0 min-w-0 bg-ink-950">
+    <main className="relative row-start-2 min-h-0 min-w-0 bg-ink-800">
       <canvas ref={canvas} className="absolute inset-0 h-full w-full outline-none" />
       <ToolOptions />
       {view && <PeerCursors view={view} canvas={canvas} />}

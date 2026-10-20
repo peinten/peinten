@@ -3,6 +3,13 @@
 Notable changes to peinten, newest first. Versions follow semantic versioning. Breaking changes are listed under
 "Breaking".
 
+## 1.2.1 - Unreleased
+
+### Fixed
+
+- Views no longer paint a fixed dark gray around the document. The area stays transparent, so the canvas element's
+  CSS background shows there, as the `'transparent'` background already did.
+
 ## 1.2.0 - 2026-10-20
 
 ### Added

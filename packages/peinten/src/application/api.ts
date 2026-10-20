@@ -31,6 +31,7 @@ export interface CreateViewOptions {
   readonly document: PaintDocument;
   /** Capture pointer, key and wheel input. `navigation: false` keeps tools but disables built-in pan and zoom. */
   readonly input?: boolean | { readonly navigation?: boolean };
+  /** Shown through transparent parts of the document. Around the document the canvas is transparent. */
   readonly background?: ViewBackground;
 }
 
