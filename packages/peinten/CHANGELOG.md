@@ -3,7 +3,7 @@
 Notable changes to peinten, newest first. Versions follow semantic versioning; before 1.0.0, a minor version may
 contain breaking changes, which are listed under "Breaking".
 
-## 0.1.0 - Unreleased
+## 0.1.0 - 2026-10-20
 
 ### Added
 
