@@ -1,7 +1,14 @@
 # Changelog
 
-Notable changes to peinten, newest first. Versions follow semantic versioning; before 1.0.0, a minor version may
-contain breaking changes, which are listed under "Breaking".
+Notable changes to peinten, newest first. Versions follow semantic versioning. Breaking changes are listed under
+"Breaking".
+
+## 1.0.0 - 2026-10-20
+
+### Changed
+
+- First stable release. The API is the same as in 0.1.0. From this version on, breaking changes come only with a new
+  major version.
 
 ## 0.1.0 - 2026-10-20
 

@@ -1,6 +1,6 @@
 {
   "name": "peinten",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Tile-based raster painting engine with a libmypaint brush engine and WebGPU compositing",
   "license": "MIT",
   "homepage": "https://peinten.vercel.app",
