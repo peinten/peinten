@@ -104,6 +104,7 @@ export const ops = {
   }),
   clear: (p: { readonly nodeId: NodeId }): ClearDraft => ({ type: 'clear', nodeId: p.nodeId }),
   /** Writes straight 8-bit RGBA pixels (e.g. from `ImageData`) into a paint layer at (x, y). */
+  /** Writes straight 8-bit RGBA into the rectangle; `replace` clears the rest of the layer too. */
   putPixels: (p: {
     readonly nodeId: NodeId;
     readonly x: number;
@@ -111,10 +112,12 @@ export const ops = {
     readonly width: number;
     readonly height: number;
     readonly data: ArrayLike<number>;
+    readonly replace?: boolean;
   }): PutTilesDraft => ({
     type: 'put-tiles',
     nodeId: p.nodeId,
-    replace: false,
+    replace: p.replace ?? false,
+    rect: { x: p.x, y: p.y, width: p.width, height: p.height },
     tiles: [...rgba8ToTiles(p.data, p.width, p.height, p.x, p.y)].map(([key, data]) => {
       const [tx, ty] = tileCoords(key);
       return { tx, ty, data };

@@ -34,6 +34,8 @@ export class WebGpuBackend implements RenderBackend {
     gpu?: GPU | undefined;
     filters: FilterRegistry;
     createKernels?: (device: GPUDevice) => readonly FilterKernel[];
+    /** Receives GPU errors that no operation catches, e.g. a failing kernel of an adjustment layer. */
+    onError: (error: unknown) => void;
   }): Promise<WebGpuBackend> {
     const gpu = options.gpu ?? (globalThis.navigator as Navigator | undefined)?.gpu;
     if (!gpu) throw new Error('WebGPU is not supported in this environment');
@@ -42,8 +44,17 @@ export class WebGpuBackend implements RenderBackend {
     const device = await adapter.requestDevice({
       requiredLimits: { maxTextureArrayLayers: adapter.limits.maxTextureArrayLayers },
     });
+    device.addEventListener('uncapturederror', (event) => options.onError((event as GPUUncapturedErrorEvent).error));
     const format = typeof gpu.getPreferredCanvasFormat === 'function' ? gpu.getPreferredCanvasFormat() : 'bgra8unorm';
-    return new WebGpuBackend(device, format, options.filters, options.createKernels?.(device) ?? []);
+    // Report WGSL and pipeline errors of custom kernels now, rather than as broken pixels later.
+    device.pushErrorScope('validation');
+    const kernels = options.createKernels?.(device) ?? [];
+    const failure = await device.popErrorScope();
+    if (failure) {
+      device.destroy();
+      throw new Error(`A custom filter kernel is invalid: ${failure.message}`);
+    }
+    return new WebGpuBackend(device, format, options.filters, kernels);
   }
 
   createDocumentCache(width: number, height: number): DocumentRenderCache {

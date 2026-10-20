@@ -28,6 +28,11 @@ export interface NodeSnapshot {
   readonly filter: FilterSpec | null;
   readonly text: TextLayerData | null;
   readonly thumbnail: Thumbnail | null;
+  /**
+   * Changes whenever the node's own pixels do: the tiles of a paint layer or the content of a text layer. Thumbnails
+   * and other properties leave it alone, so it tells when to read pixels back.
+   */
+  readonly pixelsVersion: number;
 }
 
 export interface DocumentSnapshot {
@@ -56,7 +61,13 @@ export interface SnapshotInput {
   readonly collab: CollabState;
 }
 
-function nodeSnapshot(node: DocNode, thumbnail: Thumbnail | null): NodeSnapshot {
+/** What a node's pixels come from, compared by identity. */
+function pixelsSource(node: DocNode): unknown {
+  if (node.kind === 'paint') return node.tiles;
+  return node.kind === 'text' ? node.text : null;
+}
+
+function nodeSnapshot(node: DocNode, thumbnail: Thumbnail | null, pixelsVersion: number): NodeSnapshot {
   return {
     id: node.id,
     kind: node.kind,
@@ -72,6 +83,7 @@ function nodeSnapshot(node: DocNode, thumbnail: Thumbnail | null): NodeSnapshot 
     filter: node.kind === 'adjustment' ? node.filter : null,
     text: node.kind === 'text' ? node.text : null,
     thumbnail,
+    pixelsVersion,
   };
 }
 
@@ -82,12 +94,13 @@ function nodeSnapshot(node: DocNode, thumbnail: Thumbnail | null): NodeSnapshot 
 export class SnapshotBuilder {
   #previous: DocumentSnapshot | null = null;
   readonly #nodeSources = new Map<NodeId, { node: DocNode; thumbnail: Thumbnail | null; snapshot: NodeSnapshot }>();
+  #lastPixelsVersion = 0;
   #selectionSource: unknown = null;
 
   build(input: SnapshotInput): DocumentSnapshot {
     const prev = this.#previous;
     const nodes: Record<NodeId, NodeSnapshot> = {};
-    let nodesChanged = !prev || prev.width !== input.state.width;
+    let nodesChanged = !prev;
     for (const [id, node] of input.state.nodes) {
       const thumbnail = input.thumbnails.get(id) ?? null;
       const cached = this.#nodeSources.get(id);
@@ -95,7 +108,11 @@ export class SnapshotBuilder {
         nodes[id] = cached.snapshot;
         continue;
       }
-      const snapshot = nodeSnapshot(node, thumbnail);
+      const pixelsVersion =
+        cached && pixelsSource(cached.node) === pixelsSource(node)
+          ? cached.snapshot.pixelsVersion
+          : ++this.#lastPixelsVersion;
+      const snapshot = nodeSnapshot(node, thumbnail, pixelsVersion);
       this.#nodeSources.set(id, { node, thumbnail, snapshot });
       nodes[id] = snapshot;
       nodesChanged = true;
@@ -131,6 +148,8 @@ export class SnapshotBuilder {
     };
     if (
       prev &&
+      prev.width === next.width &&
+      prev.height === next.height &&
       prev.nodes === next.nodes &&
       prev.rootIds === next.rootIds &&
       prev.activeNodeId === next.activeNodeId &&

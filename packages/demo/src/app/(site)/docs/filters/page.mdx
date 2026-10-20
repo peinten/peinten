@@ -17,7 +17,9 @@ await doc.dispatch(ops.applyFilter({ nodeId, filter: blur }));
 await doc.setFilterPreview(null);
 ```
 
-`applyFilter` runs on the GPU, reads the result back into tiles and is clipped to the issuer's selection. It is an
+`applyFilter` runs on the GPU and reads the result back into tiles. Pixels outside the issuer's selection never
+change; along soft selection edges the kernel blends its result with the original by coverage. If the kernel fails
+on the GPU, the batch is skipped and `onError` receives the reason, so a broken filter never commits pixels. It is an
 asynchronous operation; the document applies operations one at a time, so ordering is kept.
 
 ## Adjustment layers

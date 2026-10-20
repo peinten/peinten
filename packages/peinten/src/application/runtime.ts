@@ -62,6 +62,8 @@ export class LocalRuntime<T extends readonly AnyTool[]> implements ToolHost {
   readonly #listeners = new Set<() => void>();
   #activeId: ToolId<T>;
   #boundView: LocalView | null = null;
+  /** The view that received input last; `setTool` binds the new tool to it right away. */
+  #inputView: LocalView | null = null;
   #resources: BrushResources = DEFAULT_RESOURCES;
   #snapshot: RuntimeSnapshot<T>;
 
@@ -159,6 +161,11 @@ export class LocalRuntime<T extends readonly AnyTool[]> implements ToolHost {
     if (id === this.#activeId) return;
     this.#unbind();
     this.#activeId = id;
+    // Activating now lets the tool draw its overlay before the pointer moves, e.g. transform handles.
+    if (this.#inputView) {
+      this.#bind(this.#inputView);
+      this.#inputView.document.requestFrame();
+    }
     this.#publish();
   }
 
@@ -218,6 +225,7 @@ export class LocalRuntime<T extends readonly AnyTool[]> implements ToolHost {
 
   /** Binds the active tool to `view`, deactivating it on the previous view first. */
   #bind(view: LocalView): ToolContext {
+    this.#inputView = view;
     const ctx = this.#context(view);
     if (this.#boundView !== view) {
       this.#unbind();
@@ -257,6 +265,7 @@ export class LocalRuntime<T extends readonly AnyTool[]> implements ToolHost {
   }
 
   detach(view: LocalView): void {
+    if (this.#inputView === view) this.#inputView = null;
     if (this.#boundView === view) this.#unbind();
   }
 

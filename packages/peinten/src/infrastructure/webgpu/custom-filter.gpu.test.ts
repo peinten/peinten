@@ -4,9 +4,10 @@ import { useDevice } from '../../../test/gpu.ts';
 import { applyAll, newDoc, opContext, registry, stamp } from '../../../test/helpers.ts';
 import type { PaintLayer } from '../../domain/document/nodes.ts';
 import type { DocState } from '../../domain/document/state.ts';
-import { FilterRegistry, gaussianBlurFilter } from '../../domain/filters/filter.ts';
+import { FilterRegistry, type FilterSpec, gaussianBlurFilter } from '../../domain/filters/filter.ts';
 import type { OpContext } from '../../domain/ops/context.ts';
 import { ops } from '../../domain/ops/factories.ts';
+import { OperationConflictError } from '../../domain/ops/operation.ts';
 import { tilesToRgba8 } from '../../domain/raster/pixels.ts';
 import { GpuFilterExecutor } from './filter-executor.ts';
 import type { FilterKernel } from './filter-pass.ts';
@@ -17,6 +18,8 @@ import { GpuShared } from './gpu-shared.ts';
 declare module '../../domain/filters/filter.ts' {
   interface FilterParamsMap {
     invert: { readonly amount: number };
+    broken: Record<string, never>;
+    'paint-red': Record<string, never>;
   }
 }
 
@@ -155,5 +158,90 @@ describe('custom filters', () => {
       expect(Math.abs(actual! - expected!)).toBeLessThanOrEqual(1);
     }
     expect(at(30)).toEqual([200, 60, 20, 255]);
+  });
+});
+
+/** A kernel whose shader does not compile, created inside an error scope so the test device stays quiet. */
+async function createBrokenKernel(device: GPUDevice): Promise<FilterKernel> {
+  device.pushErrorScope('validation');
+  const module = device.createShaderModule({ label: 'broken', code: 'fn main( {' });
+  const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } });
+  await device.popErrorScope();
+  return {
+    type: 'broken',
+    encode(encoder) {
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(pipeline);
+      pass.dispatchWorkgroups(1);
+      pass.end();
+    },
+    dispose() {},
+  };
+}
+
+const PAINT_RED_WGSL = /* wgsl */ `
+@group(0) @binding(0) var dst: texture_storage_2d<rgba16uint, write>;
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  textureStore(dst, vec2i(id.xy), vec4u(32768u, 0u, 0u, 32768u));
+}
+`;
+
+/** A kernel that paints its whole output red and ignores the selection. */
+function createPaintRedKernel(device: GPUDevice): FilterKernel {
+  const module = device.createShaderModule({ label: 'paint red', code: PAINT_RED_WGSL });
+  const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } });
+  return {
+    type: 'paint-red',
+    encode(encoder, args) {
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(
+        0,
+        device.createBindGroup({
+          layout: pipeline.getBindGroupLayout(0),
+          entries: [{ binding: 0, resource: args.output }],
+        }),
+      );
+      pass.dispatchWorkgroups(16, 16);
+      pass.end();
+    },
+    dispose() {},
+  };
+}
+
+describe('failing and careless kernels', async () => {
+  const definitions = [
+    { type: 'broken', schema: v.object({}), margin: () => 0 },
+    { type: 'paint-red', schema: v.object({}), margin: () => 0 },
+  ] as const;
+  const careless = new FilterRegistry([gaussianBlurFilter, ...definitions]);
+  const shared = new GpuShared(device, [await createBrokenKernel(device), createPaintRedKernel(device)]);
+  const carelessContext: OpContext = {
+    ...opContext,
+    filters: careless,
+    filterExecutor: new GpuFilterExecutor(shared, careless),
+  };
+  const data = new Uint8ClampedArray(40 * 20 * 4).map((_, i) => [20, 60, 200, 255][i % 4]!);
+  const base = await applyAll(newDoc(96, 64), [
+    ops.putPixels({ nodeId: 'L', x: 0, y: 0, width: 40, height: 20, data }),
+    ops.selectShape({ mode: 'replace', shape: { kind: 'rect', x: 0, y: 0, width: 10, height: 10 } }),
+  ]);
+  const run = (type: 'broken' | 'paint-red') =>
+    registry
+      .get('apply-filter')
+      .apply(base, stamp(ops.applyFilter({ nodeId: 'L', filter: { type } as FilterSpec })), carelessContext);
+
+  it('refuses to commit the zeroed output of a kernel that failed on the GPU', async () => {
+    await expect(run('broken')).rejects.toBeInstanceOf(OperationConflictError);
+  });
+
+  it('keeps pixels outside the selection even when the kernel ignores it', async () => {
+    const state = await run('paint-red');
+    const pixels = tilesToRgba8((state.nodes.get('L') as PaintLayer).tiles, { x: 0, y: 0, width: 40, height: 20 });
+    const at = (x: number, y: number) => [...pixels.slice((y * 40 + x) * 4, (y * 40 + x) * 4 + 4)];
+    expect(at(5, 5)).toEqual([255, 0, 0, 255]);
+    expect(at(20, 5)).toEqual([20, 60, 200, 255]);
+    expect(at(5, 15)).toEqual([20, 60, 200, 255]);
   });
 });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { FakeCache, ManualScheduler } from '../../test/fakes.ts';
 import { opContext, registry } from '../../test/helpers.ts';
 import type { RenderBackend } from './ports/renderer.ts';
 import { LocalRuntime, type RuntimeDeps } from './runtime.ts';
@@ -39,5 +40,60 @@ describe('LocalRuntime snapshots', () => {
     rt.setToolOptions('probe', { size: 3 });
     expect(rt.getSnapshot().tool).not.toBe(before.tool);
     expect(rt.getSnapshot().resources).toBe(after.resources);
+  });
+});
+
+/** Records activation so tests can see when the runtime binds it to a view. */
+class OverlayTool implements ITool<'overlay'> {
+  readonly id = 'overlay';
+  readonly defaultOptions = {};
+  activations = 0;
+  activate(): void {
+    this.activations++;
+  }
+}
+
+describe('LocalRuntime tool binding', () => {
+  it('activates a newly selected tool on the view that last received input', () => {
+    const probe = new ProbeTool();
+    const overlay = new OverlayTool();
+    const scheduler = new ManualScheduler();
+    const backend = {
+      maxDocumentSize: 8192,
+      filterExecutor: opContext.filterExecutor,
+      createDocumentCache: () => new FakeCache(),
+      createViewSurface: () => ({ resize() {}, render() {}, dispose() {} }),
+    } as unknown as RenderBackend;
+    const rt = new LocalRuntime(
+      {
+        backend,
+        mixer: opContext.mixer,
+        filters: opContext.filters,
+        registry,
+        scheduler,
+        thumbnails: { create: async () => ({ close() {} }) as ImageBitmap },
+        clientId: 'me',
+        registryHash: 'test',
+        onError: (error: unknown) => {
+          throw error;
+        },
+      } as unknown as RuntimeDeps,
+      [probe, overlay] as const,
+    );
+    const doc = rt.createDocument({ width: 64, height: 64 });
+    const view = rt.createView({} as OffscreenCanvas, doc, { input: true, navigation: true, background: 'checker' });
+    // Before any input there is no view to bind to.
+    rt.setTool('overlay');
+    expect(overlay.activations).toBe(0);
+    view.handleKey('down', {
+      key: 'a',
+      code: 'KeyA',
+      repeat: false,
+      modifiers: { shift: false, ctrl: false, alt: false, meta: false },
+    });
+    expect(overlay.activations).toBe(1);
+    rt.setTool('probe');
+    rt.setTool('overlay');
+    expect(overlay.activations).toBe(2);
   });
 });

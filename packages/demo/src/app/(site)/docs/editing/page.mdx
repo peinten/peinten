@@ -32,6 +32,9 @@ the stack.
 | Selection | `selectShape` `selectWand` `selectAll` `deselect` `invertSelection` `moveSelection` |
 | Canvas | `resizeCanvas` |
 
+`putPixels` writes straight 8-bit RGBA into a rectangle and leaves the rest of the layer alone; pass `replace: true`
+to clear everything outside the rectangle as well.
+
 The built-in tools produce the same operation drafts; all but the brush tool, whose stroke draft is built by the
 live stroke session, use these factories.
 

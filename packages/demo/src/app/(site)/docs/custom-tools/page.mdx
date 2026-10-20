@@ -149,7 +149,7 @@ Every method is optional except `id` and `defaultOptions`.
 
 | Member | Called when |
 |---|---|
-| `activate(ctx)` | The active tool receives input from a view for the first time, binding it to that view |
+| `activate(ctx)` | The tool is bound to a view: by `setTool`, on the view that last received input, or by its first input on a view |
 | `deactivate(ctx)` | The user switches tools, input moves to another view, or the bound view or the runtime is disposed; drop unfinished work here |
 | `onPointerDown`, `onPointerMove`, `onPointerUp` | Pointer input on the view, already normalized |
 | `onPointerCancel(ctx)` | The pointer was lost, for example to an OS gesture; drop unfinished work here |

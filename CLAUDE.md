@@ -105,7 +105,10 @@ atlas stays) and bumps `textureGeneration`, which makes views rebuild their bind
 display and overlay render pipelines, sampler, uniforms. The layer tree is flattened into a stack program
 (`composite-plan.ts`) run by a compute shader per dirty tile; adjustment layers split it into stages with `FilterPass`
 in between. Filters (WGSL) use integer math only so results are bit-identical across GPUs; destructive filters and
-adjustment layers share one kernel.
+adjustment layers share one kernel. A GPU validation error invalidates the whole command buffer and leaves outputs
+zeroed, so `GpuFilterExecutor` runs inside an error scope and throws `OperationConflictError` on failure, and it
+restores pixels with zero selection coverage after readback. `WebGpuBackend.create` validates custom kernels and
+forwards uncaptured GPU errors to `onError`.
 
 ### Runtime surface and snapshots
 

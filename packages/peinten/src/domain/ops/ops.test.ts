@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { applyAll, hashTiles, newDoc, opContext, registry, stamp } from '../../../test/helpers.ts';
 import type { PaintLayer, TextLayer } from '../document/nodes.ts';
 import { selectionCoverage } from '../document/selection.ts';
-import { MAX_DOCUMENT_SIZE } from '../document/state.ts';
+import { type DocState, MAX_DOCUMENT_SIZE } from '../document/state.ts';
 import { rgba8ToTiles, tilesToRgba8 } from '../raster/pixels.ts';
 import { TILE_SIZE } from '../tiles/tile.ts';
 import { ops } from './factories.ts';
@@ -190,5 +190,37 @@ describe('canvas size', () => {
   it('refuses sizes beyond the document limit', () => {
     const op = { ...ops.resizeCanvas({ width: MAX_DOCUMENT_SIZE + 1, height: 10 }), id: 'o', clientId: 'me' };
     expect(() => registry.parse(op)).toThrow();
+  });
+});
+
+describe('putPixels', () => {
+  const solid = (rgba: readonly number[], size: number) =>
+    new Uint8ClampedArray(size * size * 4).map((_, i) => rgba[i % 4]!);
+  const pixel = (state: DocState, x: number, y: number) => [
+    ...tilesToRgba8((state.nodes.get('L') as PaintLayer).tiles, { x, y, width: 1, height: 1 }),
+  ];
+  const blue = [0, 0, 255, 255];
+  const red = [255, 0, 0, 255];
+
+  it('writes only inside its rectangle, including transparent pixels', async () => {
+    const state = await applyAll(newDoc(), [
+      ops.putPixels({ nodeId: 'L', x: 0, y: 0, width: 64, height: 64, data: solid(blue, 64) }),
+      ops.putPixels({ nodeId: 'L', x: 10, y: 10, width: 2, height: 2, data: solid(red, 2) }),
+      ops.putPixels({ nodeId: 'L', x: 20, y: 20, width: 2, height: 2, data: solid([0, 0, 0, 0], 2) }),
+    ]);
+    expect(pixel(state, 10, 11)).toEqual(red);
+    expect(pixel(state, 12, 12)).toEqual(blue);
+    expect(pixel(state, 0, 0)).toEqual(blue);
+    expect(pixel(state, 21, 21)).toEqual([0, 0, 0, 0]);
+    expect(pixel(state, 22, 21)).toEqual(blue);
+  });
+
+  it('clears the rest of the layer with replace', async () => {
+    const state = await applyAll(newDoc(), [
+      ops.putPixels({ nodeId: 'L', x: 0, y: 0, width: 64, height: 64, data: solid(blue, 64) }),
+      ops.putPixels({ nodeId: 'L', x: 5, y: 5, width: 1, height: 1, data: solid(red, 1), replace: true }),
+    ]);
+    expect(pixel(state, 5, 5)).toEqual(red);
+    expect(pixel(state, 0, 0)).toEqual([0, 0, 0, 0]);
   });
 });

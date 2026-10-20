@@ -29,6 +29,9 @@ await runtime.setToolOptions('transform', { mode: 'mesh', meshSize: 6 });
 await runtime.runToolCommand('transform', 'commit');
 ```
 
+`ShapeSelectTool` takes `'rect'` or `'ellipse'`, which also sets its id. Rectangles snap to whole pixels, so moving
+or transforming their content leaves no partly selected edge behind; `antialias` only smooths ellipses.
+
 Options are state the UI shows and edits. Commands are one-shot events such as "apply the transform". Some tools
 also publish UI state, for example whether the brush can paint on the active layer or whether a transform is in
 progress. It appears in `runtime.getSnapshot().tool.uiState`.

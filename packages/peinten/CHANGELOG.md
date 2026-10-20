@@ -10,15 +10,28 @@ Notable changes to peinten, newest first. Versions follow semantic versioning. B
 - `ops.resizeCanvas({ width, height, offsetX, offsetY })` changes the canvas size as an undoable operation that
   collaborators share. Layers, text and selections move by the offset; the GPU caches follow the new size.
 - `translateTiles` in `peinten/tiles`.
+- `putPixels` takes `replace` to clear the rest of the layer.
+- `NodeSnapshot.pixelsVersion` changes only when a layer's pixels do, unlike the snapshot itself, which also changes
+  with thumbnails.
 
 ### Changed
 
 - Joining a room no longer requires the same document size: the joining document takes the room's size.
 - Views center the canvas again when the document size changes, keeping their zoom and rotation.
+- `setTool` activates the new tool right away on the view that last received input, so tools such as `transform`
+  draw their handles before the pointer moves.
+- The rectangle selection tool snaps to whole pixels; `antialias` now only affects ellipses.
+- `new ShapeSelectTool('rect')` infers the tool id; the type argument is no longer needed.
+- `createRuntime` rejects when a custom filter kernel fails to compile, and later GPU errors reach `onError`.
+- `put-tiles` is now version 2, so collaborators must run 1.2.0 or later together.
 
 ### Fixed
 
 - `DocumentSnapshot.selection.bounds` encloses the selected pixels exactly instead of whole 64 px tiles.
+- A filter that fails on the GPU no longer commits transparent pixels: the batch is skipped and `onError` gets the
+  reason. Pixels outside the selection stay unchanged even when a kernel ignores the mask.
+- `putPixels` no longer clears the parts of the touched tiles that lie outside its rectangle.
+- Document snapshots now change when only the canvas height changes.
 
 ## 1.1.0 - 2026-10-20
 

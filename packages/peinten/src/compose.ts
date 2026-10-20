@@ -52,10 +52,12 @@ export async function composeRuntime<T extends readonly AnyTool[]>(
     ...(options.filters ?? []).map((f) => f.definition as FilterDefinition),
   ]);
   const operations = new OperationRegistry([...coreOperations, ...(options.operations ?? [])]);
+  const onError = options.onError ?? ((error: unknown) => console.error('[peinten]', error));
   const backend = await WebGpuBackend.create({
     gpu: options.gpu,
     filters,
     createKernels: (device) => (options.filters ?? []).map((f) => f.createKernel(device)),
+    onError,
   });
   return new LocalRuntime(
     {
@@ -69,7 +71,7 @@ export async function composeRuntime<T extends readonly AnyTool[]>(
       registry: operations,
       filters,
       clientId: options.clientId ?? newId(),
-      onError: options.onError ?? ((error) => console.error('[peinten]', error)),
+      onError,
     },
     options.tools,
   );

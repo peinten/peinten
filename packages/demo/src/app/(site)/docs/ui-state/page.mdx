@@ -153,6 +153,8 @@ export function UndoButton(props: { doc: PaintDocument }) {
 ## Thumbnails and peer cursors
 
 Layer thumbnails are `ImageBitmap`s with a `version` that changes with the bitmap, so you redraw only when needed.
+A node snapshot also changes when only its thumbnail does; to react to pixel changes alone, such as reading layer
+pixels back, compare `pixelsVersion`, which changes with the tiles of a paint layer or the content of a text layer.
 Peers in `doc.getSnapshot().collab.peers` carry cursor positions in document pixels. `documentToScreen(viewport, size)`
 returns the affine matrix from document pixels to canvas device pixels, where `size` is the canvas size in device
 pixels (`{ width: clientWidth * dpr, height: clientHeight * dpr, devicePixelRatio: dpr }`). Divide the result by

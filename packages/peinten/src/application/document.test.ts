@@ -32,6 +32,28 @@ describe('LocalDocument', () => {
     expect(layerTiles(document.state).size).toBeGreaterThan(0);
   });
 
+  it('changes pixelsVersion only when the pixels change, not with thumbnails or properties', async () => {
+    const { document, scheduler } = newLocalDocument();
+    const data = new Uint8ClampedArray(4 * 4 * 4).fill(255);
+    const node = () => document.getSnapshot().nodes.L!;
+    await document.dispatch(ops.putPixels({ nodeId: 'L', x: 0, y: 0, width: 4, height: 4, data }));
+    scheduler.flush();
+    const painted = node();
+    // The thumbnail arrives in a later frame and replaces the node snapshot.
+    for (let i = 0; i < 10 && node().thumbnail === painted.thumbnail; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      scheduler.flush();
+    }
+    expect(node().thumbnail).not.toBe(painted.thumbnail);
+    expect(node().pixelsVersion).toBe(painted.pixelsVersion);
+    await document.dispatch(ops.updateNode({ nodeId: 'L', props: { opacity: 0.5 } }));
+    scheduler.flush();
+    expect(node().pixelsVersion).toBe(painted.pixelsVersion);
+    await document.dispatch(ops.putPixels({ nodeId: 'L', x: 8, y: 0, width: 4, height: 4, data }));
+    scheduler.flush();
+    expect(node().pixelsVersion).not.toBe(painted.pixelsVersion);
+  });
+
   it('reports the selection bounds to the pixel', async () => {
     const { document, scheduler } = newLocalDocument();
     await document.dispatch(

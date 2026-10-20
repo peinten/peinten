@@ -191,6 +191,9 @@ await doc.dispatch(ops.applyFilter({ nodeId, filter: invert }));
 await doc.dispatch(ops.addAdjustmentLayer({ filter: { type: 'invert', amount: 0.5 } }));
 ```
 
+If a kernel's WGSL does not compile or its pipeline is invalid, `createRuntime` (or `connectRuntime`) rejects with
+the GPU's message. GPU errors that happen later, such as in an adjustment layer, reach the runtime's `onError`.
+
 ## Rules for kernels
 
 - **Integer math only.** Each collaborator recomputes `apply-filter` on its own GPU. Integer arithmetic is exact,
@@ -200,7 +203,7 @@ await doc.dispatch(ops.addAdjustmentLayer({ filter: { type: 'invert', amount: 0.
   JavaScript engines.
 - **Stay premultiplied.** Pixels arrive premultiplied; computing on them directly keeps transparent areas from
   bleeding color.
-- **Respect the mask.** Blend the result with the original by the mask coverage, so filters stay inside the
-  selection.
+- **Respect the mask.** Blend the result with the original by the mask coverage. peinten puts back every pixel
+  where the coverage is zero, but the soft edge inside the selection is the kernel's to blend.
 - **Same registry everywhere.** The filter type is part of the runtime's registry hash, so every collaborator must
   register the same filters.
