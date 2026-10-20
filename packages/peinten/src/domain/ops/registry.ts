@@ -27,8 +27,11 @@ export class OperationRegistry {
     return { ...(payload as object), type: stamp.type, id: stamp.id, clientId: stamp.clientId };
   }
 
-  types(): string[] {
-    return [...this.#definitions.keys()].sort();
+  /** Type names for the registry hash, with the version appended when it is above 1. */
+  signatures(): string[] {
+    return [...this.#definitions.values()]
+      .map(({ type, version = 1 }) => (version === 1 ? type : `${type}@${version}`))
+      .sort();
   }
 }
 

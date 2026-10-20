@@ -5,6 +5,6 @@
     "types": [],
     "noEmit": true
   },
-  "include": ["src/domain"],
+  "include": ["src/domain", "src/tiles.ts"],
   "exclude": ["src/**/*.test.ts"]
 }

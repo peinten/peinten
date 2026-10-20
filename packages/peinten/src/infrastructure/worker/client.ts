@@ -145,6 +145,7 @@ export async function connectRuntime<T extends readonly AnyTool[]>(
       );
       return {
         setViewport: (viewport) => api.setViewport(id, viewport),
+        setOverlay: (shapes) => api.setViewOverlay(id, shapes),
         subscribe: mirror.subscribe,
         getSnapshot: mirror.getSnapshot,
         dispose: async () => {

@@ -4,6 +4,7 @@ import type { FilterSpec } from '../domain/filters/filter.ts';
 import type { OperationDraft } from '../domain/ops/operation.ts';
 import type { Presence } from './collab/protocol.ts';
 import type { Exporter } from './export.ts';
+import type { OverlayShape } from './overlay.ts';
 import type { CollabTransport } from './ports/collab.ts';
 import type { ViewBackground } from './ports/renderer.ts';
 import type { DocumentSnapshot } from './snapshot.ts';
@@ -86,5 +87,10 @@ export interface PaintDocument extends SnapshotSource<DocumentSnapshot> {
 
 export interface PaintView extends SnapshotSource<ViewSnapshot> {
   setViewport(viewport: Partial<Viewport>): Promise<void>;
+  /**
+   * Draws shapes over the canvas, under the active tool's overlay, until replaced. Pass an empty array to clear.
+   * Coordinates are document pixels unless a shape sets `space: 'screen'`.
+   */
+  setOverlay(shapes: readonly OverlayShape[]): Promise<void>;
   dispose(): Promise<void>;
 }

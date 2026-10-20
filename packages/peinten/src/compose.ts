@@ -64,7 +64,7 @@ export async function composeRuntime<T extends readonly AnyTool[]>(
       thumbnails: imageBitmapThumbnails,
       textEngine: options.textEngine ?? new CanvasTextEngine(),
       codec: cborDocumentCodec,
-      registryHash: registryHash([...operations.types(), ...filters.types(), mixer.id]),
+      registryHash: registryHash([...operations.signatures(), ...filters.types(), mixer.id]),
       mixer,
       registry: operations,
       filters,

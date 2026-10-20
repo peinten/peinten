@@ -17,7 +17,8 @@
     "./worker": "./src/worker.ts",
     "./collab": "./src/collab.ts",
     "./tools": "./src/tools.ts",
-    "./exporting": "./src/exporting.ts"
+    "./exporting": "./src/exporting.ts",
+    "./tiles": "./src/tiles.ts"
   },
   "publishConfig": {
     "exports": {
@@ -40,6 +41,10 @@
       "./exporting": {
         "types": "./dist/exporting.d.ts",
         "default": "./dist/exporting.js"
+      },
+      "./tiles": {
+        "types": "./dist/tiles.d.ts",
+        "default": "./dist/tiles.js"
       }
     }
   },

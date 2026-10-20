@@ -60,10 +60,11 @@ pnpm --filter demo build                   # static export; also type-checks the
   capture, comlink worker bridge, collaboration transports.
 - `tools/`: `ITool` implementations. May import only `application/tool.ts` and `domain`. The engine never imports
   tools; tools reach it only through `ToolContext`.
-- `index.ts`, `worker.ts`, `tools.ts`, `collab.ts`, `exporting.ts` (+ `compose.ts`) are composition roots and the
-  public entry points (`peinten`, `peinten/worker`, `peinten/tools`, `peinten/collab`, `peinten/exporting`). Built-in
-  tool classes are exported only from `peinten/tools`; the tool contract types stay in `peinten`. `collab.ts` must
-  stay free of DOM/GPU dependencies.
+- `index.ts`, `worker.ts`, `tools.ts`, `collab.ts`, `exporting.ts`, `tiles.ts` (+ `compose.ts`) are composition
+  roots and the public entry points (`peinten`, `peinten/worker`, `peinten/tools`, `peinten/collab`,
+  `peinten/exporting`, `peinten/tiles`). Built-in tool classes are exported only from `peinten/tools`; the tool
+  contract types stay in `peinten`. `collab.ts` and `tiles.ts` must stay free of DOM/GPU dependencies
+  (`tsconfig.domain.json` type-checks `tiles.ts` with the domain).
 - Exporters are plain functions passed to `doc.export(exporter)`; the runtime never imports them, so ag-psd is
   bundled only by apps that import `psdExporter`. Keep `compose.ts` free of exporters. In the worker build an
   exporter runs on the main thread and reads the document through an export session (`beginExport`/`endExport`)
@@ -74,7 +75,7 @@ Biome `noRestrictedImports` overrides in `biome.json` enforce the layer rules fo
 
 ### State, operations, history
 
-- Pixels: premultiplied RGBA fix15 (`1 << 15` = 1.0) in 64×64 `Uint16Array` tiles; selections are single-channel
+- Pixels: premultiplied RGBA fix15 (`FIX15_ONE` = `1 << 15` = 1.0) in 64×64 `Uint16Array` tiles; selections are single-channel
   tiles of the same size. Committed tiles are immutable (copy-on-write), so diffs and GPU uploads are reference comparisons
   and rolling back history only swaps state references.
 - `DocState` changes only by applying operations registered with `defineOperation({ type, schema, prepare?, apply })`.
@@ -82,6 +83,9 @@ Biome `noRestrictedImports` overrides in `biome.json` enforce the layer rules fo
   environment-dependent results (text rasterization). `OperationConflictError` skips a batch on every peer alike.
 - Adding a core operation: define it in `domain/ops/*-ops.ts`, register it in `domain/ops/core.ts`, add a factory to
   `ops` in `domain/ops/factories.ts`. Operation types are part of the registry hash, so collaborators must match.
+- Changing what a released operation does (its `schema` or `apply`) requires raising its `version`; versions above 1
+  enter the registry hash (`type@version`), so mismatched peers are refused instead of diverging. Version 1 is left
+  out of the hash to keep it equal to 1.0.0's.
 - `Timeline` (`domain/history/timeline.ts`) keeps batches with before/after states: confirmed prefix + pending local
   batches; anything landing in the middle rolls back and replays. Undo/redo are `set-op-enabled` batches; each client
   undoes only its own batches.

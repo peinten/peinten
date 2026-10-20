@@ -1,9 +1,8 @@
-import { isEmptyTile, MASK_TILE_LENGTH, TILE_SIZE, type TileKey, tileKey } from '../tiles/tile.ts';
+import { FIX15_ONE, isEmptyTile, MASK_TILE_LENGTH, TILE_SIZE, type TileKey, tileKey } from '../tiles/tile.ts';
 import type { MaskMap, Rect } from '../tiles/tile-map.ts';
 import { type MaskBounds, renderDabMask } from './dab-mask.ts';
 import type { DabParams, Surface } from './surface.ts';
 
-const ONE = 1 << 15;
 const maskBuffer = new Uint16Array(TILE_SIZE * TILE_SIZE);
 const maskBounds: MaskBounds = { x0: 0, y0: 0, x1: 0, y1: 0 };
 
@@ -41,8 +40,8 @@ export class MaskSurface implements Surface {
     const hardness = Math.min(Math.max(dab.hardness, 0), 1);
     const softness = Math.min(Math.max(dab.softness, 0), 1);
     if (dab.radius < 0.1 || hardness === 0 || softness === 1 || opaque === 0) return false;
-    const target = Math.trunc(Math.min(Math.max(dab.colorA, 0), 1) * ONE);
-    const opacity = Math.trunc(opaque * ONE);
+    const target = Math.trunc(Math.min(Math.max(dab.colorA, 0), 1) * FIX15_ONE);
+    const opacity = Math.trunc(opaque * FIX15_ONE);
     const rFringe = dab.radius + 1;
     const tx1 = Math.floor(Math.floor(dab.x - rFringe) / TILE_SIZE);
     const tx2 = Math.floor(Math.floor(dab.x + rFringe) / TILE_SIZE);
@@ -76,7 +75,7 @@ export class MaskSurface implements Surface {
             const m = maskBuffer[i]!;
             if (!m) continue;
             const opaA = (m * opacity) >>> 15;
-            tile[i] = (opaA * target + (ONE - opaA) * tile[i]!) >>> 15;
+            tile[i] = (opaA * target + (FIX15_ONE - opaA) * tile[i]!) >>> 15;
           }
         }
       }
@@ -113,7 +112,7 @@ export class MaskSurface implements Surface {
         }
       }
     }
-    const value = weight > 0 ? sum / weight / ONE : 0;
+    const value = weight > 0 ? sum / weight / FIX15_ONE : 0;
     out[0] = out[1] = out[2] = value;
     out[3] = 1;
   }

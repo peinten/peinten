@@ -107,6 +107,7 @@ export function serveRuntime(
     viewWheel: (id, input) => views.get(id)?.handleWheel(input),
     viewResize: (id, size) => views.get(id)?.resize(size),
     setViewport: (id, viewport) => view(id).setViewport(viewport),
+    setViewOverlay: (id, shapes) => view(id).setOverlay(shapes),
     disposeView(id) {
       views.get(id)?.dispose();
       views.delete(id);

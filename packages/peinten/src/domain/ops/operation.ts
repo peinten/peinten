@@ -25,6 +25,12 @@ export type Operation<D extends OperationDraft = OperationDraft> = D & Operation
  */
 export interface OperationDefinition<D extends OperationDraft = OperationDraft> {
   readonly type: D['type'];
+  /**
+   * Raise it when `schema` or `apply` changes what an existing operation means. Collaborators must run the same
+   * version: the registry hash includes it, so peers with another version are refused instead of diverging.
+   * Defaults to 1.
+   */
+  readonly version?: number;
   /** Validates the payload, excluding `type`, `id` and `clientId`. */
   readonly schema: v.GenericSchema<unknown, Omit<D, 'type'>>;
   /**

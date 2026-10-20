@@ -162,6 +162,18 @@ Every method is optional except `id` and `defaultOptions`.
 Options are state that the runtime stores and the UI edits; commands are one-shot events. Keep options in the tool
 as received from `setOptions` rather than changing them internally, otherwise the snapshot and the tool disagree.
 
+### The overlay
+
+`drawOverlay` receives an `OverlayBuilder`. Its methods take flat point arrays `[x0, y0, x1, y1, ...]` in document
+pixels, or in CSS pixels of the canvas with `space: 'screen'`. Apps can draw the same shapes without a tool with
+`view.setOverlay`.
+
+| Method | Draws |
+|---|---|
+| `polyline(points, { color, width, dashed, closed, outline })` | A line; `outline` (on by default) adds a dark edge so it shows on any background |
+| `polygon(points, { fill, stroke })` | A filled area, an outline, or both |
+| `handle(x, y, { shape, size, fill, stroke })` | A square or round handle of constant screen size |
+
 ### The tool context
 
 | Member | Use |

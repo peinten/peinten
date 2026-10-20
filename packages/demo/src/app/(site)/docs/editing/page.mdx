@@ -92,3 +92,74 @@ await doc.dispatch(draft);
 `apply` must not mutate its input and must give the same result everywhere. When an operation depends on the
 environment, add an async `prepare(draft, context)`: it runs once on the issuing client before sending and can embed
 the result into the draft. Rasterizing text layers works this way, so every peer receives the same pixels.
+
+Once an operation has been released, collaborators running older code still apply it the old way. When a change to
+its `schema` or `apply` changes what the operation does, raise its `version` (1 when omitted). The registry hash
+includes versions above 1, so peers running another version are refused when they join instead of producing
+different pixels.
+
+### Reading and writing pixels
+
+`peinten/tiles` has the helpers the built-in operations use. Layers store premultiplied RGBA and selections store
+coverage, both as 16-bit fixed point where `FIX15_ONE` (32768) is 1.0, in 64×64 tiles keyed by `tileKey(tx, ty)`.
+A missing key is a transparent tile. Committed tiles are shared between states, including history, so never write
+into one: copy it, change the copy and build a new map.
+
+```ts
+import * as v from 'valibot';
+import { defineOperation, OperationConflictError } from 'peinten';
+import { FIX15_ONE, RGBA_TILE_LENGTH, TILE_SIZE, tileCoords, tileKeysInRect } from 'peinten/tiles';
+
+interface FillRectDraft {
+  readonly type: 'fill-rect';
+  readonly nodeId: string;
+  readonly rect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+  /** Straight RGBA in 0..1. */
+  readonly color: readonly [number, number, number, number];
+}
+
+const int = v.pipe(v.number(), v.integer());
+const unit = v.pipe(v.number(), v.minValue(0), v.maxValue(1));
+
+export const fillRect = defineOperation<FillRectDraft>({
+  type: 'fill-rect',
+  schema: v.object({
+    nodeId: v.string(),
+    rect: v.object({ x: int, y: int, width: v.pipe(int, v.minValue(1)), height: v.pipe(int, v.minValue(1)) }),
+    color: v.tuple([unit, unit, unit, unit]),
+  }),
+  apply(state, op) {
+    const layer = state.nodes.get(op.nodeId);
+    if (layer?.kind !== 'paint') throw new OperationConflictError('Not a paint layer');
+    const { x, y, width, height } = op.rect;
+    const [r, g, b, a] = op.color;
+    // Tiles hold premultiplied fix15 values.
+    const alpha = Math.round(a * FIX15_ONE);
+    const pixel = [Math.round(r * alpha), Math.round(g * alpha), Math.round(b * alpha), alpha];
+    const tiles = new Map(layer.tiles);
+    for (const key of tileKeysInRect(op.rect)) {
+      const [tx, ty] = tileCoords(key);
+      // Committed tiles are shared with earlier states, so write into a copy.
+      const tile = tiles.get(key)?.slice() ?? new Uint16Array(RGBA_TILE_LENGTH);
+      const left = Math.max(x - tx * TILE_SIZE, 0);
+      const right = Math.min(x + width - tx * TILE_SIZE, TILE_SIZE);
+      for (let py = Math.max(y - ty * TILE_SIZE, 0); py < Math.min(y + height - ty * TILE_SIZE, TILE_SIZE); py++)
+        for (let px = left; px < right; px++) tile.set(pixel, (py * TILE_SIZE + px) * 4);
+      tiles.set(key, tile);
+    }
+    const nodes = new Map(state.nodes);
+    nodes.set(layer.id, { ...layer, tiles });
+    return { ...state, nodes };
+  },
+});
+```
+
+| Export | Use |
+|---|---|
+| `TILE_SIZE`, `RGBA_TILE_LENGTH`, `MASK_TILE_LENGTH`, `FIX15_ONE` | Tile layout and the fixed-point scale |
+| `tileKey`, `tileCoords`, `tileKeysInRect`, `forEachTileInRect` | Tile coordinates and the tiles a rectangle touches |
+| `rgba8ToTiles`, `tilesToRgba8` | Convert between straight 8-bit RGBA and premultiplied fix15 tiles |
+| `isEmptyTile`, `contentBounds` | Drop empty tiles and find the bounds of the visible pixels |
+| `floodSelect` | The magic wand's mask: pixels similar to a seed pixel, connected or not |
+
+`peinten/tiles` has no DOM or GPU dependencies, like `apply` itself.

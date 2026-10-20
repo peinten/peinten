@@ -1,4 +1,4 @@
-import { MASK_TILE_LENGTH, TILE_SIZE, type TileKey, tileKey } from '../tiles/tile.ts';
+import { FIX15_ONE, MASK_TILE_LENGTH, TILE_SIZE, type TileKey, tileKey } from '../tiles/tile.ts';
 import type { TileMap } from '../tiles/tile-map.ts';
 import { FULL_MASK_TILE } from './polygon.ts';
 
@@ -34,7 +34,7 @@ export function floodSelect(tiles: TileMap, options: FloodOptions): Map<TileKey,
   const seed = new Uint16Array(4);
   const current = new Uint16Array(4);
   pixel(tiles, Math.floor(options.x), Math.floor(options.y), seed);
-  const limit = options.tolerance * (1 << 15);
+  const limit = options.tolerance * FIX15_ONE;
   const matches = (x: number, y: number) => {
     pixel(tiles, x, y, current);
     for (let c = 0; c < 4; c++) if (Math.abs(current[c]! - seed[c]!) > limit) return false;
@@ -47,7 +47,7 @@ export function floodSelect(tiles: TileMap, options: FloodOptions): Map<TileKey,
       tile = new Uint16Array(MASK_TILE_LENGTH);
       result.set(key, tile);
     }
-    tile[(y % TILE_SIZE) * TILE_SIZE + (x % TILE_SIZE)] = 1 << 15;
+    tile[(y % TILE_SIZE) * TILE_SIZE + (x % TILE_SIZE)] = FIX15_ONE;
   };
 
   if (!options.contiguous) {
@@ -78,6 +78,6 @@ export function floodSelect(tiles: TileMap, options: FloodOptions): Map<TileKey,
       }
     }
   }
-  for (const [key, tile] of result) if (tile.every((v) => v === 1 << 15)) result.set(key, FULL_MASK_TILE);
+  for (const [key, tile] of result) if (tile.every((v) => v === FIX15_ONE)) result.set(key, FULL_MASK_TILE);
   return result;
 }

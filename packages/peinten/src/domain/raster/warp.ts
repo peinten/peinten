@@ -1,4 +1,12 @@
-import { isEmptyTile, MASK_TILE_LENGTH, RGBA_TILE_LENGTH, TILE_SIZE, type TileKey, tileKey } from '../tiles/tile.ts';
+import {
+  FIX15_ONE,
+  isEmptyTile,
+  MASK_TILE_LENGTH,
+  RGBA_TILE_LENGTH,
+  TILE_SIZE,
+  type TileKey,
+  tileKey,
+} from '../tiles/tile.ts';
 import { forEachTileInRect, intersectRect, type MaskMap, type Rect, type TileMap } from '../tiles/tile-map.ts';
 
 /**
@@ -12,8 +20,6 @@ export interface WarpMesh {
   /** (cols + 1) * (rows + 1) vertices of [x, y, w], row-major. */
   readonly points: readonly number[];
 }
-
-const ONE = 1 << 15;
 
 /** Copies the source rectangle out of the tiles, weighted by the clip coverage. */
 function extract(tiles: TileMap<Uint16Array>, rect: Rect, clip: MaskMap | null, channels: number): Uint16Array {
@@ -31,7 +37,7 @@ function extract(tiles: TileMap<Uint16Array>, rect: Rect, clip: MaskMap | null, 
         const x = tx * TILE_SIZE + px - rect.x;
         if (x < 0 || x >= rect.width) continue;
         const i = py * TILE_SIZE + px;
-        const k = coverage ? coverage[i]! : ONE;
+        const k = coverage ? coverage[i]! : FIX15_ONE;
         for (let c = 0; c < channels; c++)
           out[(y * rect.width + x) * channels + c] = (tile[i * channels + c]! * k) >>> 15;
       }
@@ -62,7 +68,7 @@ function lift<T extends Uint16Array>(
         const x = tx * TILE_SIZE + px;
         if (x < rect.x || x >= rect.x + rect.width) continue;
         const i = py * TILE_SIZE + px;
-        const keep = ONE - (coverage ? coverage[i]! : ONE);
+        const keep = FIX15_ONE - (coverage ? coverage[i]! : FIX15_ONE);
         for (let c = 0; c < channels; c++) next[i * channels + c] = (next[i * channels + c]! * keep) >>> 15;
       }
     }
@@ -209,8 +215,8 @@ export function warpTiles<T extends Uint16Array>(
       written.set(key, tile);
     }
     const i = ((y % TILE_SIZE) * TILE_SIZE + (x % TILE_SIZE)) * channels;
-    const keep = 1 - Math.min(alpha / ONE, 1);
-    for (let c = 0; c < channels; c++) tile[i + c] = Math.min(Math.round(px[c]! + tile[i + c]! * keep), ONE);
+    const keep = 1 - Math.min(alpha / FIX15_ONE, 1);
+    for (let c = 0; c < channels; c++) tile[i + c] = Math.min(Math.round(px[c]! + tile[i + c]! * keep), FIX15_ONE);
   });
   for (const [key, tile] of written) result.set(key, tile);
   return result;

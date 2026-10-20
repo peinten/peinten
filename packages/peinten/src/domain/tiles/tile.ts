@@ -1,6 +1,9 @@
 /** Edge length of a square tile in pixels. Matches libmypaint's tile size. */
 export const TILE_SIZE = 64;
 
+/** 1.0 in fix15, the 16-bit fixed point that tiles store: values run from 0 to this. */
+export const FIX15_ONE = 1 << 15;
+
 /** Number of 16-bit values in an RGBA tile. */
 export const RGBA_TILE_LENGTH = TILE_SIZE * TILE_SIZE * 4;
 

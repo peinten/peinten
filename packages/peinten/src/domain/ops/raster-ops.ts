@@ -6,7 +6,7 @@ import { SAMPLE_STRIDE } from '../brush/stroke-samples.ts';
 import type { NodeId, PaintLayer } from '../document/nodes.ts';
 import { nodeIdSchema } from '../document/schema.ts';
 import type { DocState } from '../document/state.ts';
-import { isEmptyTile, RGBA_TILE_LENGTH, TILE_SIZE, type TileKey, tileKey } from '../tiles/tile.ts';
+import { FIX15_ONE, isEmptyTile, RGBA_TILE_LENGTH, TILE_SIZE, type TileKey, tileKey } from '../tiles/tile.ts';
 import type { TileMap } from '../tiles/tile-map.ts';
 import { defineOperation, OperationConflictError } from './operation.ts';
 import { StrokeRenderer, type StrokeTarget } from './stroke-renderer.ts';
@@ -80,7 +80,7 @@ export const clearOp = defineOperation<ClearDraft>({
       if (!tile) continue;
       const next = tile.slice();
       for (let i = 0; i < TILE_SIZE * TILE_SIZE; i++) {
-        const keep = (1 << 15) - coverage[i]!;
+        const keep = FIX15_ONE - coverage[i]!;
         for (let c = 0; c < 4; c++) next[i * 4 + c] = (next[i * 4 + c]! * keep) >>> 15;
       }
       if (isEmptyTile(next)) tiles.delete(key);

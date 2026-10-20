@@ -1,7 +1,5 @@
-import { isEmptyTile, RGBA_TILE_LENGTH, TILE_SIZE, type TileKey, tileKey } from '../tiles/tile.ts';
+import { FIX15_ONE, isEmptyTile, RGBA_TILE_LENGTH, TILE_SIZE, type TileKey, tileKey } from '../tiles/tile.ts';
 import { forEachTileInRect, type Rect, type TileMap } from '../tiles/tile-map.ts';
-
-const ONE = 1 << 15;
 
 /** Converts straight 8-bit RGBA pixels placed at (x, y) into premultiplied fix15 tiles. Empty tiles are omitted. */
 export function rgba8ToTiles(
@@ -24,7 +22,7 @@ export function rgba8ToTiles(
         const a = data[s + 3]!;
         if (a === 0) continue;
         const d = (py * TILE_SIZE + px) * 4;
-        const alpha = Math.round((a / 255) * ONE);
+        const alpha = Math.round((a / 255) * FIX15_ONE);
         tile[d] = Math.round((data[s]! / 255) * alpha);
         tile[d + 1] = Math.round((data[s + 1]! / 255) * alpha);
         tile[d + 2] = Math.round((data[s + 2]! / 255) * alpha);
@@ -55,7 +53,7 @@ export function tilesToRgba8(tiles: TileMap, rect: Rect): Uint8ClampedArray {
         out[d] = (tile[s]! / a) * 255 + 0.5;
         out[d + 1] = (tile[s + 1]! / a) * 255 + 0.5;
         out[d + 2] = (tile[s + 2]! / a) * 255 + 0.5;
-        out[d + 3] = (a / ONE) * 255 + 0.5;
+        out[d + 3] = (a / FIX15_ONE) * 255 + 0.5;
       }
     }
   });

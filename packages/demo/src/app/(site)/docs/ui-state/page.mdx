@@ -157,3 +157,20 @@ Peers in `doc.getSnapshot().collab.peers` carry cursor positions in document pix
 returns the affine matrix from document pixels to canvas device pixels, where `size` is the canvas size in device
 pixels (`{ width: clientWidth * dpr, height: clientHeight * dpr, devicePixelRatio: dpr }`). Divide the result by
 `devicePixelRatio` to position DOM elements in CSS pixels.
+
+## Overlays
+
+To show something over the canvas regardless of the active tool, such as an area the user picked in a panel, give
+the view shapes as data. They are drawn under the active tool's overlay and stay until replaced; pass an empty array
+to remove them. Coordinates are document pixels, so the shapes follow panning, zooming and rotation.
+
+```ts
+await view.setOverlay([
+  { kind: 'polygon', points: [100, 100, 400, 100, 400, 300, 100, 300], fill: [0.3, 0.5, 1, 0.25] },
+  { kind: 'polyline', points: [100, 100, 400, 300], color: [1, 1, 1, 1], dashed: true },
+]);
+```
+
+Each kind takes the options of the `OverlayBuilder` method with the same name: `polyline` (`color`, `width`,
+`dashed`, `closed`, `outline`), `polygon` (`fill`, `stroke`) and `handle` (`shape`, `size`, `fill`, `stroke`). Colors
+are straight RGBA in 0..1. Set `space: 'screen'` to place a shape in CSS pixels of the canvas instead.

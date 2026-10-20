@@ -74,6 +74,7 @@ export class MainThreadRuntime<T extends readonly AnyTool[]> implements PaintRun
     );
     return {
       setViewport: async (viewport) => view.setViewport(viewport),
+      setOverlay: async (shapes) => view.setOverlay(shapes),
       subscribe: view.subscribe,
       getSnapshot: view.getSnapshot,
       dispose: async () => {

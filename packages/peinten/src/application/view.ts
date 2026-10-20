@@ -1,6 +1,6 @@
 import { applyAffine } from '../domain/geometry/affine.ts';
 import type { LocalDocument } from './document.ts';
-import { EMPTY_OVERLAY, OverlayBuilder } from './overlay.ts';
+import { EMPTY_OVERLAY, OverlayBuilder, type OverlayShape } from './overlay.ts';
 import type { ViewBackground, ViewSurface } from './ports/renderer.ts';
 import type { PointerInput, ToolKeyEvent, ToolPointerEvent } from './tool.ts';
 import {
@@ -54,6 +54,7 @@ export class LocalView {
   readonly #removeFrameListener: () => void;
   #spaceHeld = false;
   #pan: { pointerId: number; x: number; y: number } | null = null;
+  #overlay: readonly OverlayShape[] = [];
 
   constructor(
     document: LocalDocument,
@@ -181,13 +182,20 @@ export class LocalView {
     this.#host?.key(this, kind, event);
   }
 
+  /** Shapes the app draws over this view, under the active tool's overlay. They stay until replaced. */
+  setOverlay(shapes: readonly OverlayShape[]): void {
+    this.#overlay = shapes;
+    this.document.requestFrame();
+  }
+
   /** Called by the document's frame loop after the composite is up to date. */
   frame(time: number): boolean {
     if (this.#size.width === 0) return false;
     let overlay = EMPTY_OVERLAY;
-    if (this.#host) {
+    if (this.#host || this.#overlay.length > 0) {
       const builder = new OverlayBuilder(documentToScreen(this.#viewport, this.#size), this.#size.devicePixelRatio);
-      this.#host.overlay(this, builder);
+      builder.shapes(this.#overlay);
+      this.#host?.overlay(this, builder);
       overlay = builder.build();
     }
     this.#surface.render(this.#viewport, overlay, this.#background, time / 1000);

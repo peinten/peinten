@@ -1,6 +1,7 @@
 import type { CreateDocumentOptions, RuntimeSnapshot } from '../../application/api.ts';
 import type { Presence } from '../../application/collab/protocol.ts';
 import type { ExportLayer, RasterImage } from '../../application/export.ts';
+import type { OverlayShape } from '../../application/overlay.ts';
 import type { ViewBackground } from '../../application/ports/renderer.ts';
 import type { DocumentSnapshot } from '../../application/snapshot.ts';
 import type { AnyTool, PointerInput, ToolKeyEvent } from '../../application/tool.ts';
@@ -55,6 +56,7 @@ export interface WorkerApi {
   viewWheel(id: number, input: WheelInput): void;
   viewResize(id: number, size: CanvasSize): void;
   setViewport(id: number, viewport: Partial<Viewport>): void;
+  setViewOverlay(id: number, shapes: readonly OverlayShape[]): void;
   disposeView(id: number): void;
   dispose(): void;
 }

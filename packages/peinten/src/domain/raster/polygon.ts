@@ -1,8 +1,8 @@
-import { MASK_TILE_LENGTH, TILE_SIZE, type TileKey, tileKey } from '../tiles/tile.ts';
+import { FIX15_ONE, MASK_TILE_LENGTH, TILE_SIZE, type TileKey, tileKey } from '../tiles/tile.ts';
 import type { Rect } from '../tiles/tile-map.ts';
 
 /** A tile fully covered by a mask. Shared by reference; tiles are immutable. */
-export const FULL_MASK_TILE: Uint16Array = new Uint16Array(MASK_TILE_LENGTH).fill(1 << 15);
+export const FULL_MASK_TILE: Uint16Array = new Uint16Array(MASK_TILE_LENGTH).fill(FIX15_ONE);
 
 /**
  * Rasterizes a closed polygon into fix15 coverage tiles with exact-area anti-aliasing.

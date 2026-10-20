@@ -1,4 +1,4 @@
-import { isEmptyTile, RGBA_TILE_LENGTH, TILE_SIZE, type TileKey, tileKey } from '../tiles/tile.ts';
+import { FIX15_ONE, isEmptyTile, RGBA_TILE_LENGTH, TILE_SIZE, type TileKey, tileKey } from '../tiles/tile.ts';
 import type { MaskMap, Rect, TileMap } from '../tiles/tile-map.ts';
 import type { ColorMixer } from './color-mixer.ts';
 import { type MaskBounds, renderDabMask } from './dab-mask.ts';
@@ -14,7 +14,6 @@ import {
 } from './pixel-blend.ts';
 import type { DabParams, Surface } from './surface.ts';
 
-const ONE = 1 << 15;
 const maskBuffer = new Uint16Array(TILE_SIZE * TILE_SIZE);
 const maskBounds: MaskBounds = { x0: 0, y0: 0, x1: 0, y1: 0 };
 const ZERO_RGBA = new Uint16Array(RGBA_TILE_LENGTH);
@@ -105,9 +104,9 @@ export class TiledSurface implements Surface {
     const paint = Math.min(Math.max(dab.paint, 0), 1);
     if (dab.radius < 0.1 || hardness === 0 || softness === 1 || opaque === 0) return false;
 
-    const cr = Math.trunc(Math.min(Math.max(dab.colorR, 0), 1) * ONE);
-    const cg = Math.trunc(Math.min(Math.max(dab.colorG, 0), 1) * ONE);
-    const cb = Math.trunc(Math.min(Math.max(dab.colorB, 0), 1) * ONE);
+    const cr = Math.trunc(Math.min(Math.max(dab.colorR, 0), 1) * FIX15_ONE);
+    const cg = Math.trunc(Math.min(Math.max(dab.colorG, 0), 1) * FIX15_ONE);
+    const cb = Math.trunc(Math.min(Math.max(dab.colorB, 0), 1) * FIX15_ONE);
     const colorA = Math.min(Math.max(dab.colorA, 0), 1);
     const normal = (1 - lockAlpha) * (1 - colorize) * (1 - posterize);
     const aspect = dab.aspectRatio < 1 ? 1 : dab.aspectRatio;
@@ -140,28 +139,39 @@ export class TiledSurface implements Surface {
         // Port of libmypaint's process_op: stamp the mask once per active blend mode.
         if (paint < 1) {
           if (normal) {
-            const opacity = Math.trunc(normal * opaque * (1 - paint) * ONE);
+            const opacity = Math.trunc(normal * opaque * (1 - paint) * FIX15_ONE);
             if (colorA === 1) blendNormal(maskBuffer, b, rgba, cr, cg, cb, opacity);
-            else blendNormalAndEraser(maskBuffer, b, rgba, cr, cg, cb, Math.trunc(colorA * ONE), opacity);
+            else blendNormalAndEraser(maskBuffer, b, rgba, cr, cg, cb, Math.trunc(colorA * FIX15_ONE), opacity);
           }
           if (lockAlpha && colorA !== 0) {
-            const opacity = Math.trunc(lockAlpha * opaque * (1 - colorize) * (1 - posterize) * (1 - paint) * ONE);
+            const opacity = Math.trunc(lockAlpha * opaque * (1 - colorize) * (1 - posterize) * (1 - paint) * FIX15_ONE);
             blendLockAlpha(maskBuffer, b, rgba, cr, cg, cb, opacity);
           }
         }
         if (paint > 0) {
           if (normal) {
-            const opacity = Math.trunc(normal * opaque * paint * ONE);
+            const opacity = Math.trunc(normal * opaque * paint * FIX15_ONE);
             if (colorA === 1) blendNormalPaint(mixer, maskBuffer, b, rgba, cr, cg, cb, opacity);
-            else blendNormalAndEraserPaint(mixer, maskBuffer, b, rgba, cr, cg, cb, Math.trunc(colorA * ONE), opacity);
+            else
+              blendNormalAndEraserPaint(
+                mixer,
+                maskBuffer,
+                b,
+                rgba,
+                cr,
+                cg,
+                cb,
+                Math.trunc(colorA * FIX15_ONE),
+                opacity,
+              );
           }
           if (lockAlpha && colorA !== 0) {
-            const opacity = Math.trunc(lockAlpha * opaque * (1 - colorize) * (1 - posterize) * paint * ONE);
+            const opacity = Math.trunc(lockAlpha * opaque * (1 - colorize) * (1 - posterize) * paint * FIX15_ONE);
             blendLockAlphaPaint(mixer, maskBuffer, b, rgba, cr, cg, cb, opacity);
           }
         }
-        if (colorize) blendColor(maskBuffer, b, rgba, cr, cg, cb, Math.trunc(colorize * opaque * ONE));
-        if (posterize) blendPosterize(maskBuffer, b, rgba, Math.trunc(posterize * opaque * ONE), posterizeNum);
+        if (colorize) blendColor(maskBuffer, b, rgba, cr, cg, cb, Math.trunc(colorize * opaque * FIX15_ONE));
+        if (posterize) blendPosterize(maskBuffer, b, rgba, Math.trunc(posterize * opaque * FIX15_ONE), posterizeNum);
       }
     }
     return true;
@@ -239,7 +249,7 @@ export class TiledSurface implements Surface {
               const alpha = rgba[p + 3]!;
               const a = (m * alpha) / 2 ** 30;
               const alphaSums = a + sumA;
-              sumWeight += m / ONE;
+              sumWeight += m / FIX15_ONE;
               let facA = 1;
               let facB = 1;
               if (alphaSums > 0) {

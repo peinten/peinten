@@ -1,11 +1,18 @@
 import { FULL_MASK_TILE } from '../raster/polygon.ts';
-import { isEmptyTile, MASK_TILE_LENGTH, TILE_SIZE, type TileKey, tileCoords, tileKey } from '../tiles/tile.ts';
+import {
+  FIX15_ONE,
+  isEmptyTile,
+  MASK_TILE_LENGTH,
+  TILE_SIZE,
+  type TileKey,
+  tileCoords,
+  tileKey,
+} from '../tiles/tile.ts';
 import { forEachTileInRect, type MaskMap, type Rect, tileKeysInRect } from '../tiles/tile-map.ts';
 
 export type SelectionMode = 'replace' | 'add' | 'subtract' | 'intersect';
 export const SELECTION_MODES: readonly SelectionMode[] = ['replace', 'add', 'subtract', 'intersect'];
 
-const ONE = 1 << 15;
 const isFull = (tile: Uint16Array | undefined) => tile === FULL_MASK_TILE;
 
 function combineTile(
@@ -32,7 +39,8 @@ function combineTile(
   for (let i = 0; i < MASK_TILE_LENGTH; i++) {
     const va = a![i]!;
     const vb = b![i]!;
-    out[i] = mode === 'add' ? Math.max(va, vb) : mode === 'subtract' ? (va * (ONE - vb)) >>> 15 : Math.min(va, vb);
+    out[i] =
+      mode === 'add' ? Math.max(va, vb) : mode === 'subtract' ? (va * (FIX15_ONE - vb)) >>> 15 : Math.min(va, vb);
   }
   return isEmptyTile(out) ? undefined : out;
 }
@@ -67,7 +75,7 @@ export function invertMask(mask: MaskMap | null, bounds: Rect): MaskMap | null {
     }
     if (isFull(tile)) return;
     const out = new Uint16Array(MASK_TILE_LENGTH);
-    for (let i = 0; i < MASK_TILE_LENGTH; i++) out[i] = ONE - tile[i]!;
+    for (let i = 0; i < MASK_TILE_LENGTH; i++) out[i] = FIX15_ONE - tile[i]!;
     if (!isEmptyTile(out)) result.set(key, out);
   });
   return result.size ? result : null;
@@ -81,7 +89,7 @@ export function selectionCoverage(mask: MaskMap, x: number, y: number): number {
   const ty = Math.floor(py / TILE_SIZE);
   const tile = mask.get(tileKey(tx, ty));
   if (!tile) return 0;
-  return tile[(py - ty * TILE_SIZE) * TILE_SIZE + (px - tx * TILE_SIZE)]! / ONE;
+  return tile[(py - ty * TILE_SIZE) * TILE_SIZE + (px - tx * TILE_SIZE)]! / FIX15_ONE;
 }
 
 /** Shifts the selection by whole pixels. Coverage moved outside the document is dropped. */

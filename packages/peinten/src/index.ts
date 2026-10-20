@@ -28,6 +28,13 @@ export type {
   PlacedImage,
   RasterImage,
 } from './application/export.ts';
+export type {
+  HandleStyle,
+  LineStyle,
+  OverlayShape,
+  OverlaySpace,
+  PolygonStyle,
+} from './application/overlay.ts';
 export type { ViewBackground, WarpPreview } from './application/ports/renderer.ts';
 export type {
   FontHandle,

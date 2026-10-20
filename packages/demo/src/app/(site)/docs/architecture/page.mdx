@@ -10,8 +10,9 @@ src/
   application/     use cases and ports: runtime, document, view, tool contract, collaboration, export
   infrastructure/  port implementations: WebGPU, Canvas2D text, file codec, exporters, input, worker bridge, transports
   tools/           ITool implementations; they see the engine only through ToolContext
-  index.ts, worker.ts, tools.ts, collab.ts, exporting.ts
-                   entry points: peinten, peinten/worker, peinten/tools, peinten/collab, peinten/exporting
+  index.ts, worker.ts, tools.ts, collab.ts, exporting.ts, tiles.ts
+                   entry points: peinten, peinten/worker, peinten/tools, peinten/collab, peinten/exporting,
+                   peinten/tiles
 ```
 
 Dependencies point inward only. Biome's `noRestrictedImports` enforces this for `domain`, `application`, `tools` and

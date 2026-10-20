@@ -18,7 +18,7 @@ export const EMPTY_OVERLAY: OverlayGeometry = { vertices: new Float32Array(0) };
 
 export type OverlaySpace = 'document' | 'screen';
 
-interface LineStyle {
+export interface LineStyle {
   readonly color?: OverlayColor;
   /** Width in screen pixels. */
   readonly width?: number;
@@ -29,7 +29,7 @@ interface LineStyle {
   readonly outline?: boolean;
 }
 
-interface HandleStyle {
+export interface HandleStyle {
   readonly shape?: 'square' | 'circle';
   /** Size in screen pixels. */
   readonly size?: number;
@@ -37,6 +37,20 @@ interface HandleStyle {
   readonly stroke?: OverlayColor;
   readonly space?: OverlaySpace;
 }
+
+export interface PolygonStyle {
+  /** No fill when omitted. */
+  readonly fill?: OverlayColor;
+  /** Outline, drawn like a closed `polyline`. No outline when omitted. */
+  readonly stroke?: Omit<LineStyle, 'closed' | 'space'>;
+  readonly space?: OverlaySpace;
+}
+
+/** A shape as data: what `PaintView.setOverlay` takes. Each kind maps to the builder method of the same name. */
+export type OverlayShape =
+  | ({ readonly kind: 'polyline'; readonly points: readonly number[] } & LineStyle)
+  | ({ readonly kind: 'polygon'; readonly points: readonly number[] } & PolygonStyle)
+  | ({ readonly kind: 'handle'; readonly x: number; readonly y: number } & HandleStyle);
 
 const WHITE: OverlayColor = [1, 1, 1, 1];
 const BLACK: OverlayColor = [0, 0, 0, 0.85];
@@ -87,6 +101,30 @@ export class OverlayBuilder {
     strokePolyline(screen, width, style.closed ?? false, tris);
     this.#push(tris, style.color ?? WHITE, style.dashed ?? false);
   }
+  /** Fills and outlines a polygon given as flat [x0, y0, x1, y1, ...]. */
+  polygon(points: readonly number[], style: PolygonStyle = {}): void {
+    const space = style.space ?? 'document';
+    if (style.fill) this.#fill(this.#project(points, space), style.fill);
+    if (style.stroke) this.polyline(points, { ...style.stroke, closed: true, space });
+  }
+
+  /** Draws shapes given as data, in order. */
+  shapes(shapes: readonly OverlayShape[]): void {
+    for (const shape of shapes) {
+      switch (shape.kind) {
+        case 'polyline':
+          this.polyline(shape.points, shape);
+          break;
+        case 'polygon':
+          this.polygon(shape.points, shape);
+          break;
+        case 'handle':
+          this.handle(shape.x, shape.y, shape);
+          break;
+      }
+    }
+  }
+
   /** Fills a polygon already in device pixels. */
   #fill(screen: number[], color: OverlayColor): void {
     const indices = earcut(screen);

@@ -25,7 +25,7 @@ const IGNORE_MARK = 'check-unused-ignore';
 /** Files whose declarations are used from outside this analysis, so they are not checked themselves. */
 const EXTERNALLY_USED = [
   // Library entry points: their exports are the public API.
-  /\/packages\/peinten\/src\/(index|worker|tools|collab|exporting)\.ts$/,
+  /\/packages\/peinten\/src\/(index|worker|tools|collab|exporting|tiles)\.ts$/,
   // Files that Next.js, Vitest or a Worker constructor load by convention.
   /\/src\/app\/(.*\/)?(page|layout|route|not-found|global-error|manifest)\.tsx?$/,
   /\/src\/mdx-components\.tsx$/,
