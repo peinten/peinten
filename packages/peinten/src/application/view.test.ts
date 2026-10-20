@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { newLocalDocument } from '../../test/fakes.ts';
+import { ops } from '../domain/ops/factories.ts';
 import { OVERLAY_VERTEX_FLOATS, OverlayBuilder, type OverlayGeometry } from './overlay.ts';
 import type { ViewSurface } from './ports/renderer.ts';
 import { LocalView } from './view.ts';
@@ -27,6 +28,20 @@ describe('overlays', () => {
     expect(colors.slice(2).every((color) => color === BLUE.join(','))).toBe(true);
     // Document coordinates go through the view transform.
     expect([...geometry.vertices.slice(0, 2)].every((value) => value >= 10 && value <= 30)).toBe(true);
+  });
+
+  it('centers the canvas again when its size changes, keeping the zoom', async () => {
+    const { document, scheduler } = newLocalDocument();
+    const surface: ViewSurface = { resize() {}, render() {}, dispose() {} };
+    const view = new LocalView(document, surface, { host: null, navigation: false, background: 'checker' });
+    view.resize({ width: 100, height: 100, devicePixelRatio: 1 });
+    view.setViewport({ zoom: 3, centerX: 10, centerY: 20 });
+    await document.dispatch(ops.resizeCanvas({ width: 300, height: 90, offsetX: 50 }));
+    scheduler.flush();
+    expect(view.viewport).toMatchObject({ zoom: 3, centerX: 150, centerY: 45 });
+    await document.undo();
+    scheduler.flush();
+    expect(view.viewport).toMatchObject({ zoom: 3, centerX: 64, centerY: 64 });
   });
 
   it('draws app shapes on views without tools until they are replaced', () => {

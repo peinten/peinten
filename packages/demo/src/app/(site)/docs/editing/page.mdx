@@ -30,9 +30,28 @@ the stack.
 | Nodes | `addLayer` `addGroup` `addAdjustmentLayer` `addTextLayer` `removeNode` `moveNode` `updateNode` `updateText` `duplicateNode` |
 | Pixels | `stroke` `clear` `putPixels` `applyFilter` `rasterizeNode` `warp` |
 | Selection | `selectShape` `selectWand` `selectAll` `deselect` `invertSelection` `moveSelection` |
+| Canvas | `resizeCanvas` |
 
 The built-in tools produce the same operation drafts; all but the brush tool, whose stroke draft is built by the
 live stroke session, use these factories.
+
+### Canvas size
+
+`resizeCanvas` changes the document size. `offsetX` and `offsetY` say where the old top-left corner lands, so they
+decide which side grows or shrinks. Every paint layer, text layer and selection moves by the offset, and pixels that end
+up outside the canvas are removed. Undo brings them back, and collaborators apply the same change.
+
+```ts
+// Add 100 px on every side.
+await doc.dispatch(ops.resizeCanvas({ width: w + 200, height: h + 200, offsetX: 100, offsetY: 100 }));
+
+// Crop to the selection, as one undo step.
+const { x, y, width, height } = doc.getSnapshot().selection!.bounds;
+await doc.dispatch([ops.resizeCanvas({ width, height, offsetX: -x, offsetY: -y }), ops.deselect()]);
+```
+
+Each edge must stay between 1 and 8192 pixels. Whenever the size changes, including through undo or a collaborator,
+views center the canvas again and keep their zoom and rotation.
 
 ## Local state
 
@@ -161,5 +180,6 @@ export const fillRect = defineOperation<FillRectDraft>({
 | `rgba8ToTiles`, `tilesToRgba8` | Convert between straight 8-bit RGBA and premultiplied fix15 tiles |
 | `isEmptyTile`, `contentBounds` | Drop empty tiles and find the bounds of the visible pixels |
 | `floodSelect` | The magic wand's mask: pixels similar to a seed pixel, connected or not |
+| `translateTiles` | Move RGBA or mask tiles by whole pixels, dropping what leaves a rectangle |
 
 `peinten/tiles` has no DOM or GPU dependencies, like `apply` itself.

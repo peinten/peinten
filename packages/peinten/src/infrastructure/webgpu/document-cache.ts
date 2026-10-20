@@ -42,11 +42,11 @@ const floatBits = (value: number) => {
 export class DocumentGpuCache implements DocumentRenderCache {
   readonly #gpu: GpuShared;
   readonly #filters: FilterRegistry;
-  readonly width: number;
-  readonly height: number;
+  #width: number;
+  #height: number;
   readonly #atlas: TileAtlas;
-  readonly composite: GPUTexture;
-  readonly selection: GPUTexture;
+  #composite: GPUTexture;
+  #selection: GPUTexture;
   readonly #dummyUint: GPUTexture;
   readonly #dummyArray: GPUTexture;
   #results: GPUTexture | null = null;
@@ -63,27 +63,17 @@ export class DocumentGpuCache implements DocumentRenderCache {
   #source: RenderSource | null = null;
   /** Incremented after every composite so views know when to redraw. */
   version = 0;
+  /** Incremented when the canvas size changes and the composite and selection textures are replaced. */
+  textureGeneration = 0;
 
   constructor(gpu: GpuShared, filters: FilterRegistry, width: number, height: number) {
     this.#gpu = gpu;
     this.#filters = filters;
-    this.width = width;
-    this.height = height;
+    this.#width = width;
+    this.#height = height;
     const device = gpu.device;
     this.#atlas = new TileAtlas(device, 'rgba16uint');
-    this.composite = device.createTexture({
-      label: 'composite',
-      size: [width, height],
-      format: 'rgba16float',
-      mipLevelCount: Math.floor(Math.log2(Math.max(width, height))) + 1,
-      usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
-    });
-    this.selection = device.createTexture({
-      label: 'selection',
-      size: [width, height],
-      format: 'r16uint',
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-    });
+    [this.#composite, this.#selection] = this.#createCanvasTextures();
     this.#dummyUint = device.createTexture({
       size: [1, 1],
       format: 'rgba16uint',
@@ -94,6 +84,67 @@ export class DocumentGpuCache implements DocumentRenderCache {
       format: 'rgba16uint',
       usage: GPUTextureUsage.TEXTURE_BINDING,
     });
+  }
+
+  get width(): number {
+    return this.#width;
+  }
+
+  get height(): number {
+    return this.#height;
+  }
+
+  get composite(): GPUTexture {
+    return this.#composite;
+  }
+
+  get selection(): GPUTexture {
+    return this.#selection;
+  }
+
+  #createCanvasTextures(): [composite: GPUTexture, selection: GPUTexture] {
+    const device = this.#gpu.device;
+    const size = [this.#width, this.#height];
+    return [
+      device.createTexture({
+        label: 'composite',
+        size,
+        format: 'rgba16float',
+        mipLevelCount: Math.floor(Math.log2(Math.max(this.#width, this.#height))) + 1,
+        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
+      }),
+      device.createTexture({
+        label: 'selection',
+        size,
+        format: 'r16uint',
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      }),
+    ];
+  }
+
+  /**
+   * Replaces every texture sized like the canvas. Tiles in the atlas do not depend on the size and stay; the
+   * selection is uploaded again and the next composite covers the whole canvas.
+   */
+  #resize(width: number, height: number): void {
+    for (const texture of [
+      this.#composite,
+      this.#selection,
+      this.#results,
+      this.#scratch,
+      this.#filterOut,
+      this.#warped,
+    ])
+      texture?.destroy();
+    this.#results = this.#scratch = this.#filterOut = this.#warped = null;
+    this.#width = width;
+    this.#height = height;
+    [this.#composite, this.#selection] = this.#createCanvasTextures();
+    this.#selectionTiles.clear();
+    this.#lastSelection = null;
+    this.#lastLiveSelection = null;
+    this.#plan = null;
+    this.textureGeneration++;
   }
 
   get #docRect(): Rect {
@@ -234,6 +285,7 @@ export class DocumentGpuCache implements DocumentRenderCache {
   sync(source: RenderSource, hint: DirtyHint): void {
     this.#source = source;
     const state = source.state;
+    if (state.width !== this.#width || state.height !== this.#height) this.#resize(state.width, state.height);
     let dirty: Rect | null = null;
 
     // Pixel sources: paint layers (with the live stroke on top) and rendered text.
@@ -503,8 +555,8 @@ export class DocumentGpuCache implements DocumentRenderCache {
 
   dispose(): void {
     this.#atlas.dispose();
-    this.composite.destroy();
-    this.selection.destroy();
+    this.#composite.destroy();
+    this.#selection.destroy();
     this.#dummyUint.destroy();
     this.#dummyArray.destroy();
     this.#results?.destroy();

@@ -7,20 +7,20 @@ import {
   SELECTION_MODES,
   type SelectionMode,
   selectAllMask,
-  translateMask,
 } from '../document/selection.ts';
 import type { DocState } from '../document/state.ts';
 import { floodSelect } from '../raster/flood-fill.ts';
 import { ellipsePolygon, rasterizePolygon } from '../raster/polygon.ts';
-import type { MaskMap } from '../tiles/tile-map.ts';
+import { type MaskMap, translateTiles } from '../tiles/tile-map.ts';
 import { defineOperation, OperationConflictError } from './operation.ts';
 
 const finite = v.pipe(v.number(), v.finite());
 const modeSchema = v.picklist(SELECTION_MODES);
 
+/** Sets the client's selection; an empty mask means no selection. */
 function withSelection(state: DocState, clientId: string, mask: MaskMap | null): DocState {
   const selections = new Map(state.selections);
-  if (mask) selections.set(clientId, mask);
+  if (mask?.size) selections.set(clientId, mask);
   else selections.delete(clientId);
   return { ...state, selections };
 }
@@ -155,6 +155,6 @@ export const moveSelectionOp = defineOperation<MoveSelectionDraft>({
   apply: (state, op) => {
     const mask = state.selections.get(op.clientId);
     if (!mask) return state;
-    return withSelection(state, op.clientId, translateMask(mask, op.dx, op.dy, bounds(state)));
+    return withSelection(state, op.clientId, translateTiles(mask, op.dx, op.dy, bounds(state), 1));
   },
 });

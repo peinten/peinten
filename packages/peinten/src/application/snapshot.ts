@@ -2,8 +2,9 @@ import type { BlendMode } from '../domain/document/blend-mode.ts';
 import type { DocNode, NodeId, NodeKind } from '../domain/document/nodes.ts';
 import type { DocState } from '../domain/document/state.ts';
 import type { FilterSpec } from '../domain/filters/filter.ts';
+import { contentBounds } from '../domain/raster/bounds.ts';
 import type { TextLayerData } from '../domain/text/text-layer.ts';
-import { type Rect, tileMapBounds } from '../domain/tiles/tile-map.ts';
+import type { Rect } from '../domain/tiles/tile-map.ts';
 import type { CollabState } from './collab/session.ts';
 
 /** A layer thumbnail. `version` changes whenever `bitmap` does, so consumers can skip redrawing. */
@@ -35,6 +36,7 @@ export interface DocumentSnapshot {
   readonly nodes: Readonly<Record<NodeId, NodeSnapshot>>;
   readonly rootIds: readonly NodeId[];
   readonly activeNodeId: NodeId | null;
+  /** This client's selection; `bounds` encloses every pixel with any coverage. */
   readonly selection: { readonly bounds: Rect } | null;
   readonly quickMask: boolean;
   readonly history: { readonly canUndo: boolean; readonly canRedo: boolean };
@@ -108,7 +110,7 @@ export class SnapshotBuilder {
     let selection = prev?.selection ?? null;
     if (mask !== this.#selectionSource) {
       this.#selectionSource = mask;
-      const bounds = mask ? tileMapBounds(mask) : null;
+      const bounds = mask ? contentBounds(mask, 1) : null;
       selection = bounds ? { bounds } : null;
     }
     const history =

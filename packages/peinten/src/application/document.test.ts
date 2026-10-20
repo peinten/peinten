@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { newLocalDocument } from '../../test/fakes.ts';
+import { type FakeCache, newLocalDocument } from '../../test/fakes.ts';
 import { hashTiles, samplesOf } from '../../test/helpers.ts';
 import { resolveBrush } from '../domain/brush/resolve-brush.ts';
 import { DEFAULT_BRUSH } from '../domain/brush/settings.ts';
@@ -30,6 +30,27 @@ describe('LocalDocument', () => {
     );
     expect(hashTiles(layerTiles(replay.state))).toBe(live);
     expect(layerTiles(document.state).size).toBeGreaterThan(0);
+  });
+
+  it('reports the selection bounds to the pixel', async () => {
+    const { document, scheduler } = newLocalDocument();
+    await document.dispatch(
+      ops.selectShape({ mode: 'replace', shape: { kind: 'rect', x: 10, y: 5, width: 20, height: 7 } }),
+    );
+    scheduler.flush();
+    expect(document.getSnapshot().selection?.bounds).toEqual({ x: 10, y: 5, width: 20, height: 7 });
+  });
+
+  it('undoes a canvas resize', async () => {
+    const { document, scheduler } = newLocalDocument();
+    await document.dispatch(ops.resizeCanvas({ width: 300, height: 90, offsetX: 10 }));
+    scheduler.flush();
+    expect([document.getSnapshot().width, document.getSnapshot().height]).toEqual([300, 90]);
+    await document.undo();
+    scheduler.flush();
+    expect([document.getSnapshot().width, document.getSnapshot().height]).toEqual([128, 128]);
+    // The fake cache sees every size the frames draw.
+    expect((document.cache as FakeCache).source!.state.width).toBe(128);
   });
 
   it('holds edits back while an exporter reads the document', async () => {

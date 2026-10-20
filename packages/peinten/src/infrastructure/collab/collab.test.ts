@@ -175,6 +175,23 @@ describe('collaboration', () => {
     expect(late.state.selections.has('a')).toBe(true);
   });
 
+  it('syncs canvas size changes and lets joiners of another size adopt the room size', async () => {
+    const hub = createInMemoryHub({ registry: 'test', operations: registry });
+    const a = peer('a');
+    a.connect(hub.connect());
+    await hub.settle();
+    await a.dispatch(ops.resizeCanvas({ width: 200, height: 40, offsetX: 5, offsetY: -3 }));
+    await hub.settle();
+    const late = newLocalDocument({ clientId: 'late', width: 64, height: 64 }).document;
+    late.connect(hub.connect());
+    await hub.settle();
+    expect([late.width, late.height]).toEqual([200, 40]);
+    expect(summarize(late.state)).toEqual(summarize(a.state));
+    await late.dispatch(ops.resizeCanvas({ width: 50, height: 50 }));
+    await hub.settle();
+    expect([a.width, a.height]).toEqual([50, 50]);
+  });
+
   it('keeps typed arrays through the message codec', () => {
     const samples = new Float32Array([1.5, 2.25]);
     const message = { t: 'submit', batchId: 'b', ops: [{ type: 'stroke', id: 'o', clientId: 'c', samples }] } as const;

@@ -3,6 +3,23 @@
 Notable changes to peinten, newest first. Versions follow semantic versioning. Breaking changes are listed under
 "Breaking".
 
+## 1.2.0 - Unreleased
+
+### Added
+
+- `ops.resizeCanvas({ width, height, offsetX, offsetY })` changes the canvas size as an undoable operation that
+  collaborators share. Layers, text and selections move by the offset; the GPU caches follow the new size.
+- `translateTiles` in `peinten/tiles`.
+
+### Changed
+
+- Joining a room no longer requires the same document size: the joining document takes the room's size.
+- Views center the canvas again when the document size changes, keeping their zoom and rotation.
+
+### Fixed
+
+- `DocumentSnapshot.selection.bounds` encloses the selected pixels exactly instead of whole 64 px tiles.
+
 ## 1.1.0 - 2026-10-20
 
 ### Added

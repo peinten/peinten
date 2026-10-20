@@ -253,7 +253,7 @@ sequenceDiagram
 `Sequencer` keeps commits in a `MemoryCommitLog` by default. Implement `CommitLog` to store them elsewhere. A client
 joining with no usable history receives a snapshot: the latest stored one, or a fresh one requested from a connected
 participant. Every `snapshotInterval` commits (200 by default) a participant is asked for a snapshot so older commits
-can be dropped. All participants must share the document size.
+can be dropped. A joining document takes the room's size, which `resizeCanvas` may have changed since it was created.
 
 `createInMemoryHub` wires a sequencer to in-memory transports for tests; `settle(random)` delivers messages in a
 random interleaving to check convergence.

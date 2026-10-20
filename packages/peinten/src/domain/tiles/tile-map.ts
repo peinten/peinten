@@ -1,4 +1,4 @@
-import { type MaskTile, type RgbaTile, TILE_SIZE, type TileKey, tileCoords, tileKey } from './tile.ts';
+import { isEmptyTile, type MaskTile, type RgbaTile, TILE_SIZE, type TileKey, tileCoords, tileKey } from './tile.ts';
 
 /** Sparse, copy-on-write tile storage. Missing keys mean fully transparent tiles. */
 export type TileMap<T extends Uint16Array = RgbaTile> = ReadonlyMap<TileKey, T>;
@@ -80,4 +80,51 @@ export function intersectRect(a: Rect, b: Rect): Rect | null {
 /** Grows a rectangle by `margin` pixels on every side. */
 export function inflateRect(rect: Rect, margin: number): Rect {
   return { x: rect.x - margin, y: rect.y - margin, width: rect.width + margin * 2, height: rect.height + margin * 2 };
+}
+
+/**
+ * Moves tiles by whole pixels and keeps only what lands inside `bounds`. `channels` is 4 for RGBA tiles and 1 for
+ * masks. Tiles that move by whole tiles and stay inside `bounds` are shared instead of copied; tiles left empty are
+ * dropped.
+ */
+export function translateTiles<T extends Uint16Array>(
+  tiles: TileMap<T>,
+  dx: number,
+  dy: number,
+  bounds: Rect,
+  channels: 1 | 4,
+): Map<TileKey, T> {
+  const result = new Map<TileKey, T>();
+  const copies = new Set<TileKey>();
+  const aligned = dx % TILE_SIZE === 0 && dy % TILE_SIZE === 0;
+  for (const [key, tile] of tiles) {
+    const [tx, ty] = tileCoords(key);
+    const moved = { x: tx * TILE_SIZE + dx, y: ty * TILE_SIZE + dy, width: TILE_SIZE, height: TILE_SIZE };
+    const visible = intersectRect(moved, bounds);
+    if (!visible) continue;
+    // Moving by whole tiles maps each tile onto exactly one target, so whole tiles can be reused as they are.
+    if (aligned && visible.width === TILE_SIZE && visible.height === TILE_SIZE) {
+      result.set(tileKey(tx + dx / TILE_SIZE, ty + dy / TILE_SIZE), tile);
+      continue;
+    }
+    forEachTileInRect(visible, (ttx, tty) => {
+      const target = { x: ttx * TILE_SIZE, y: tty * TILE_SIZE, width: TILE_SIZE, height: TILE_SIZE };
+      const part = intersectRect(visible, target)!;
+      const targetKey = tileKey(ttx, tty);
+      let out = result.get(targetKey);
+      if (!out) {
+        out = new Uint16Array(TILE_SIZE * TILE_SIZE * channels) as T;
+        result.set(targetKey, out);
+        copies.add(targetKey);
+      }
+      const rowLength = part.width * channels;
+      for (let y = part.y; y < part.y + part.height; y++) {
+        const from = ((y - moved.y) * TILE_SIZE + (part.x - moved.x)) * channels;
+        const to = ((y - target.y) * TILE_SIZE + (part.x - target.x)) * channels;
+        out.set(tile.subarray(from, from + rowLength), to);
+      }
+    });
+  }
+  for (const key of copies) if (isEmptyTile(result.get(key)!)) result.delete(key);
+  return result;
 }

@@ -1,5 +1,8 @@
 import type { ClientId, DocNode, NodeId, PaintLayer, SelectionMask } from './nodes.ts';
 
+/** Largest document edge. Bounded so a full recomposite fits in one GPU dispatch and memory stays reasonable. */
+export const MAX_DOCUMENT_SIZE = 8192;
+
 /** Committed, immutable document state. Only operations produce new states. */
 export interface DocState {
   readonly width: number;

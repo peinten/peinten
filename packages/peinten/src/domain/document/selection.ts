@@ -1,13 +1,5 @@
 import { FULL_MASK_TILE } from '../raster/polygon.ts';
-import {
-  FIX15_ONE,
-  isEmptyTile,
-  MASK_TILE_LENGTH,
-  TILE_SIZE,
-  type TileKey,
-  tileCoords,
-  tileKey,
-} from '../tiles/tile.ts';
+import { FIX15_ONE, isEmptyTile, MASK_TILE_LENGTH, TILE_SIZE, type TileKey, tileKey } from '../tiles/tile.ts';
 import { forEachTileInRect, type MaskMap, type Rect, tileKeysInRect } from '../tiles/tile-map.ts';
 
 export type SelectionMode = 'replace' | 'add' | 'subtract' | 'intersect';
@@ -90,33 +82,4 @@ export function selectionCoverage(mask: MaskMap, x: number, y: number): number {
   const tile = mask.get(tileKey(tx, ty));
   if (!tile) return 0;
   return tile[(py - ty * TILE_SIZE) * TILE_SIZE + (px - tx * TILE_SIZE)]! / FIX15_ONE;
-}
-
-/** Shifts the selection by whole pixels. Coverage moved outside the document is dropped. */
-export function translateMask(mask: MaskMap, dx: number, dy: number, bounds: Rect): MaskMap | null {
-  const result = new Map<TileKey, Uint16Array>();
-  for (const [key, tile] of mask) {
-    const [tx, ty] = tileCoords(key);
-    for (let py = 0; py < TILE_SIZE; py++) {
-      const y = ty * TILE_SIZE + py + dy;
-      if (y < bounds.y || y >= bounds.y + bounds.height) continue;
-      const dty = Math.floor(y / TILE_SIZE);
-      const row = (y - dty * TILE_SIZE) * TILE_SIZE;
-      for (let px = 0; px < TILE_SIZE; px++) {
-        const value = tile[py * TILE_SIZE + px]!;
-        if (value === 0) continue;
-        const x = tx * TILE_SIZE + px + dx;
-        if (x < bounds.x || x >= bounds.x + bounds.width) continue;
-        const dtx = Math.floor(x / TILE_SIZE);
-        const target = tileKey(dtx, dty);
-        let out = result.get(target);
-        if (!out) {
-          out = new Uint16Array(MASK_TILE_LENGTH);
-          result.set(target, out);
-        }
-        out[row + (x - dtx * TILE_SIZE)] = value;
-      }
-    }
-  }
-  return result.size ? result : null;
 }

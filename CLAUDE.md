@@ -100,7 +100,9 @@ Biome `noRestrictedImports` overrides in `biome.json` enforce the layer rules fo
 CPU computes dabs; GPU composites. Per runtime (`GpuShared`): device and the compute pipelines for
 compositing, filters, mips and warp previews. Per document: `DocumentGpuCache` (tile atlas as
 `rgba16uint` texture array, selection texture, `rgba16float` composite with mips, adjustment intermediates, warp
-preview). Per view: canvas context, display and overlay render pipelines, sampler, uniforms. The layer tree is flattened into a stack program
+preview). The size follows `DocState`: when `sync` sees a new size it replaces the canvas-sized textures (the tile
+atlas stays) and bumps `textureGeneration`, which makes views rebuild their bind groups. Per view: canvas context,
+display and overlay render pipelines, sampler, uniforms. The layer tree is flattened into a stack program
 (`composite-plan.ts`) run by a compute shader per dirty tile; adjustment layers split it into stages with `FilterPass`
 in between. Filters (WGSL) use integer math only so results are bit-identical across GPUs; destructive filters and
 adjustment layers share one kernel.
@@ -120,7 +122,8 @@ framework.
 `CollabSession` applies commits through the document's queue, resends pending batches after every welcome, and
 resyncs from a snapshot when a toggle targets a batch outside its history. Transports: in-memory hub (tests,
 `settle(random)` shuffles delivery), BroadcastChannel + Web Locks leader election, worker relay over `MessageChannel`.
-Collaborators must share registry hash (operations, filters, color mixer) and document size.
+Collaborators must share the registry hash (operations, filters, color mixer); the document size travels with the
+state (`resize-canvas`), so a joiner takes the room's size.
 Strokes in progress on paint layers are relayed unsequenced as `stroke` messages (begin/samples/end, keyed by seed),
 like presence; `PeerStrokes` replays them on each peer into extra `RenderSource.live` entries and drops a preview when
 the commit with the same seed is applied. Presence and `stroke` messages bypass the apply queue so they keep flowing

@@ -5,6 +5,7 @@ import { DropdownMenu } from '@/components/dropdown-menu';
 import { Modal } from '@/components/modal';
 import { useSnapshot } from '@/hooks/snapshots';
 import { BlurDialog } from './blur-dialog';
+import { CanvasSizeDialog } from './canvas-size-dialog';
 import { CollabControls } from './collab-controls';
 import { downloadBlob } from './download';
 import { useEditor } from './editor-context';
@@ -17,11 +18,13 @@ export function TopBar() {
   const { document, view, openDocument } = useEditor();
   const history = useSnapshot(document, (s) => s.history);
   const quickMask = useSnapshot(document, (s) => s.quickMask);
+  const selection = useSnapshot(document, (s) => s.selection);
   const imageInput = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
   const [blurOpen, setBlurOpen] = useState(false);
+  const [canvasSizeOpen, setCanvasSizeOpen] = useState(false);
   const [size, setSize] = useState({ width: 1600, height: 1200 });
 
   const open = (options: Parameters<typeof openDocument>[0]) =>
@@ -85,6 +88,22 @@ export function TopBar() {
           },
         ]}
       />
+      <DropdownMenu
+        label="Image"
+        entries={[
+          { label: 'Canvas size…', onSelect: () => setCanvasSizeOpen(true) },
+          {
+            label: 'Crop to selection',
+            disabled: !selection,
+            onSelect: () => {
+              if (!selection) return;
+              const { x, y, width, height } = selection.bounds;
+              // One dispatch, so cropping is a single undo step.
+              void document.dispatch([ops.resizeCanvas({ width, height, offsetX: -x, offsetY: -y }), ops.deselect()]);
+            },
+          },
+        ]}
+      />
       <DropdownMenu label="Filter" entries={[{ label: 'Gaussian blur…', onSelect: () => setBlurOpen(true) }]} />
       <DropdownMenu
         label="View"
@@ -128,6 +147,7 @@ export function TopBar() {
         }}
       />
       <BlurDialog open={blurOpen} onOpenChange={setBlurOpen} />
+      <CanvasSizeDialog open={canvasSizeOpen} onOpenChange={setCanvasSizeOpen} />
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
       <Modal open={newOpen} onOpenChange={setNewOpen} title="New document">
         <form

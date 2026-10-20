@@ -8,6 +8,7 @@ import type { WarpMesh } from '../raster/warp.ts';
 import { DEFAULT_TEXT_STYLE, type TextLayerData } from '../text/text-layer.ts';
 import { tileCoords } from '../tiles/tile.ts';
 import type { Rect } from '../tiles/tile-map.ts';
+import type { ResizeCanvasDraft } from './canvas-ops.ts';
 import type { ApplyFilterDraft } from './filter-ops.ts';
 import { newId } from './ids.ts';
 import type {
@@ -128,6 +129,19 @@ export const ops = {
     ...p,
   }),
   rasterizeNode: (p: { readonly nodeId: NodeId }): RasterizeNodeDraft => ({ type: 'rasterize-node', nodeId: p.nodeId }),
+  /** `offsetX`/`offsetY` place the old top-left corner on the new canvas; they default to 0. */
+  resizeCanvas: (p: {
+    readonly width: number;
+    readonly height: number;
+    readonly offsetX?: number;
+    readonly offsetY?: number;
+  }): ResizeCanvasDraft => ({
+    type: 'resize-canvas',
+    width: Math.round(p.width),
+    height: Math.round(p.height),
+    offsetX: Math.round(p.offsetX ?? 0),
+    offsetY: Math.round(p.offsetY ?? 0),
+  }),
   selectAll: () => ({ type: 'select-all' }) as const,
   deselect: () => ({ type: 'deselect' }) as const,
   invertSelection: () => ({ type: 'invert-selection' }) as const,

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { applyAll, hashTiles, newDoc, opContext, registry, stamp } from '../../../test/helpers.ts';
+import type { PaintLayer, TextLayer } from '../document/nodes.ts';
 import { selectionCoverage } from '../document/selection.ts';
+import { MAX_DOCUMENT_SIZE } from '../document/state.ts';
 import { rgba8ToTiles, tilesToRgba8 } from '../raster/pixels.ts';
 import { TILE_SIZE } from '../tiles/tile.ts';
 import { ops } from './factories.ts';
@@ -159,5 +161,34 @@ describe('warp', () => {
   it('round-trips 8-bit pixels through fix15 tiles', () => {
     const data = new Uint8ClampedArray([255, 128, 0, 255, 10, 20, 30, 128]);
     expect(tilesToRgba8(rgba8ToTiles(data, 2, 1, 5, 7), { x: 5, y: 7, width: 2, height: 1 })).toEqual(data);
+  });
+});
+
+describe('canvas size', () => {
+  it('moves layers, text and selections by the offset and crops to the new canvas', async () => {
+    const text = ops.addTextLayer({ name: 'Title' });
+    const red = new Uint8ClampedArray(4 * 4 * 4).map((_, i) => (i % 4 === 1 || i % 4 === 2 ? 0 : 255));
+    let state = await applyAll(newDoc(256, 256), [
+      ops.putPixels({ nodeId: 'L', x: 10, y: 10, width: 4, height: 4, data: red }),
+      text,
+      ops.selectShape({ mode: 'replace', shape: { kind: 'rect', x: 0, y: 0, width: 20, height: 20 } }),
+    ]);
+    const before = (state.nodes.get(text.nodeId) as TextLayer).text.transform;
+    state = await applyAll(state, [ops.resizeCanvas({ width: 100, height: 50, offsetX: -8, offsetY: 30 })]);
+    expect([state.width, state.height]).toEqual([100, 50]);
+    const tiles = (state.nodes.get('L') as PaintLayer).tiles;
+    expect([...tilesToRgba8(tiles, { x: 2, y: 40, width: 1, height: 1 })]).toEqual([255, 0, 0, 255]);
+    // Rows 44.. of the moved block fall below the new canvas.
+    expect(tilesToRgba8(tiles, { x: 2, y: 44, width: 4, height: 6 }).every((v) => v === 0)).toBe(true);
+    const after = (state.nodes.get(text.nodeId) as TextLayer).text.transform;
+    expect([after[4] - before[4], after[5] - before[5]]).toEqual([-8, 30]);
+    const mask = state.selections.get('me')!;
+    expect(selectionCoverage(mask, 11, 49)).toBe(1);
+    expect(selectionCoverage(mask, 12, 40)).toBe(0);
+  });
+
+  it('refuses sizes beyond the document limit', () => {
+    const op = { ...ops.resizeCanvas({ width: MAX_DOCUMENT_SIZE + 1, height: 10 }), id: 'o', clientId: 'me' };
+    expect(() => registry.parse(op)).toThrow();
   });
 });

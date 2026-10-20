@@ -155,6 +155,29 @@ describe('GPU compositing', () => {
     cache.dispose();
   });
 
+  it('follows canvas size changes with new textures', async () => {
+    let state = await fill(newDoc(64, 64), 'L', [10, 200, 30, 255]);
+    state = await applyAll(state, [
+      ops.selectShape({ mode: 'replace', shape: { kind: 'rect', x: 0, y: 0, width: 8, height: 8 } }),
+    ]);
+    const cache = new DocumentGpuCache(gpu, opContext.filters, 64, 64);
+    cache.sync(source(state, { selection: state.selections.get('me')! }), noHint);
+    const generation = cache.textureGeneration;
+    state = await applyAll(state, [ops.resizeCanvas({ width: 100, height: 70, offsetX: 20, offsetY: 3 })]);
+    cache.sync(source(state, { selection: state.selections.get('me')! }), noHint);
+    expect([cache.width, cache.height, cache.textureGeneration]).toEqual([100, 70, generation + 1]);
+    const pixels = await cache.readComposite();
+    expect(pixels.length).toBe(100 * 70 * 4);
+    // The layer moved right by 20, so the strip left of it is transparent.
+    expect(pixels[(10 * 100 + 10) * 4 + 3]).toBe(0);
+    expect([...pixels.slice((10 * 100 + 30) * 4, (10 * 100 + 30) * 4 + 4)]).toEqual([10, 200, 30, 255]);
+    const fresh = new DocumentGpuCache(gpu, opContext.filters, 100, 70);
+    fresh.sync(source(state), noHint);
+    expect(pixels).toEqual(await fresh.readComposite());
+    cache.dispose();
+    fresh.dispose();
+  });
+
   it('recomposites only dirty tiles with the same result as a full composite', async () => {
     let state = await fill(newDoc(192, 128), 'L', [10, 200, 30, 255]);
     const cache = new DocumentGpuCache(gpu, opContext.filters, 192, 128);

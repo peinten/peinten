@@ -3,7 +3,7 @@ import type { BrushSettings } from '../domain/brush/settings.ts';
 import type { StrokeSample } from '../domain/brush/stroke-samples.ts';
 import type { ClientId, NodeId, TextLayer } from '../domain/document/nodes.ts';
 import { deserializeDocument, serializeDocument } from '../domain/document/serialization.ts';
-import { type DocState, walkNodes } from '../domain/document/state.ts';
+import { type DocState, MAX_DOCUMENT_SIZE, walkNodes } from '../domain/document/state.ts';
 import type { FilterSpec } from '../domain/filters/filter.ts';
 import { type Batch, Timeline } from '../domain/history/timeline.ts';
 import type { BatchId } from '../domain/history/toggle.ts';
@@ -425,10 +425,10 @@ export class LocalDocument {
       },
       reset: async (data) => {
         const state = deserializeDocument(this.#deps.codec.decode(data), this.#deps.opContext.filters);
-        // GPU caches and views are sized at creation, so the room must share this document's size.
-        if (state.width !== this.width || state.height !== this.height)
+        // The room's size wins; the GPU cache follows it on the next frame. Files may be larger than peinten renders.
+        if (state.width > MAX_DOCUMENT_SIZE || state.height > MAX_DOCUMENT_SIZE)
           throw new Error(
-            `The shared document is ${state.width}×${state.height}, this one is ${this.width}×${this.height}`,
+            `The shared document is ${state.width}×${state.height}, more than ${MAX_DOCUMENT_SIZE} pixels`,
           );
         await this.#timeline.reset(state);
         this.#afterChange();

@@ -17,4 +17,11 @@ export {
   tileCoords,
   tileKey,
 } from './domain/tiles/tile.ts';
-export { forEachTileInRect, type MaskMap, type Rect, type TileMap, tileKeysInRect } from './domain/tiles/tile-map.ts';
+export {
+  forEachTileInRect,
+  type MaskMap,
+  type Rect,
+  type TileMap,
+  tileKeysInRect,
+  translateTiles,
+} from './domain/tiles/tile-map.ts';

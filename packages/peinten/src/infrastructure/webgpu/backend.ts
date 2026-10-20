@@ -1,4 +1,5 @@
 import type { DocumentRenderCache, RenderBackend, ViewSurface } from '../../application/ports/renderer.ts';
+import { MAX_DOCUMENT_SIZE } from '../../domain/document/state.ts';
 import type { FilterRegistry } from '../../domain/filters/filter.ts';
 import type { FilterExecutor } from '../../domain/ops/context.ts';
 import { DocumentGpuCache } from './document-cache.ts';
@@ -6,9 +7,6 @@ import { GpuFilterExecutor } from './filter-executor.ts';
 import type { FilterKernel } from './filter-pass.ts';
 import { GpuShared } from './gpu-shared.ts';
 import { WebGpuViewSurface } from './view-surface.ts';
-
-/** Largest document edge. Bounded so a full recomposite fits in one dispatch and memory stays reasonable. */
-const MAX_DOCUMENT_SIZE = 8192;
 
 /** WebGPU implementation of the renderer port. */
 export class WebGpuBackend implements RenderBackend {

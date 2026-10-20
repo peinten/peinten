@@ -49,6 +49,8 @@ export class LocalView {
   #viewport: Viewport = DEFAULT_VIEWPORT;
   #size: CanvasSize = { width: 0, height: 0, devicePixelRatio: 1 };
   #fitted = false;
+  /** Document size the viewport was last placed for. */
+  #documentSize: { width: number; height: number };
   #snapshot: ViewSnapshot = { viewport: DEFAULT_VIEWPORT };
   readonly #listeners = new Set<() => void>();
   readonly #removeFrameListener: () => void;
@@ -66,6 +68,7 @@ export class LocalView {
     this.#host = options.host;
     this.#navigation = options.navigation;
     this.#background = options.background;
+    this.#documentSize = { width: document.width, height: document.height };
     this.#removeFrameListener = document.addFrameListener(this);
   }
 
@@ -190,6 +193,12 @@ export class LocalView {
 
   /** Called by the document's frame loop after the composite is up to date. */
   frame(time: number): boolean {
+    const { width, height } = this.document;
+    // A canvas resize, its undo or a collaborator's resize recenters the canvas, keeping zoom and rotation.
+    if (width !== this.#documentSize.width || height !== this.#documentSize.height) {
+      this.#documentSize = { width, height };
+      this.setViewport({ centerX: width / 2, centerY: height / 2 });
+    }
     if (this.#size.width === 0) return false;
     let overlay = EMPTY_OVERLAY;
     if (this.#host || this.#overlay.length > 0) {

@@ -108,7 +108,10 @@ export class WebGpuViewSurface implements ViewSurface {
   readonly #overlay: GPURenderPipeline;
   readonly #uniforms: GPUBuffer;
   readonly #sampler: GPUSampler;
+  readonly #layout: GPUBindGroupLayout;
   #bindGroup: GPUBindGroup;
+  /** The cache's texture generation that `#bindGroup` refers to. */
+  #boundGeneration: number;
   #size: CanvasSize = { width: 1, height: 1, devicePixelRatio: 1 };
 
   constructor(
@@ -125,7 +128,7 @@ export class WebGpuViewSurface implements ViewSurface {
     this.#context = context;
     context.configure({ device, format, alphaMode: 'premultiplied' });
     const module = device.createShaderModule({ label: 'display', code: DISPLAY_WGSL });
-    const layout = device.createBindGroupLayout({
+    this.#layout = device.createBindGroupLayout({
       entries: [
         { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
         { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
@@ -133,7 +136,7 @@ export class WebGpuViewSurface implements ViewSurface {
         { binding: 3, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
       ],
     });
-    const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
+    const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [this.#layout] });
     this.#display = device.createRenderPipeline({
       label: 'display',
       layout: pipelineLayout,
@@ -173,12 +176,17 @@ export class WebGpuViewSurface implements ViewSurface {
     });
     this.#uniforms = device.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.#sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear' });
-    this.#bindGroup = device.createBindGroup({
-      layout,
+    this.#bindGroup = this.#createBindGroup();
+    this.#boundGeneration = cache.textureGeneration;
+  }
+
+  #createBindGroup(): GPUBindGroup {
+    return this.#device.createBindGroup({
+      layout: this.#layout,
       entries: [
-        { binding: 0, resource: cache.composite.createView() },
+        { binding: 0, resource: this.#cache.composite.createView() },
         { binding: 1, resource: this.#sampler },
-        { binding: 2, resource: cache.selection.createView() },
+        { binding: 2, resource: this.#cache.selection.createView() },
         { binding: 3, resource: { buffer: this.#uniforms } },
       ],
     });
@@ -234,6 +242,10 @@ export class WebGpuViewSurface implements ViewSurface {
       ],
     });
     pass.setPipeline(this.#display);
+    if (this.#boundGeneration !== this.#cache.textureGeneration) {
+      this.#bindGroup = this.#createBindGroup();
+      this.#boundGeneration = this.#cache.textureGeneration;
+    }
     pass.setBindGroup(0, this.#bindGroup);
     pass.draw(3);
     let vertexBuffer: GPUBuffer | null = null;
