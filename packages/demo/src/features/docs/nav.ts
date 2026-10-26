@@ -25,6 +25,7 @@ export const DOCS_NAV: readonly { readonly section: string; readonly pages: read
       { href: '/docs/tools', title: 'Tools' },
       { href: '/docs/brushes', title: 'Brushes' },
       { href: '/docs/selections-and-transform', title: 'Selections and transform' },
+      { href: '/docs/layer-masks', title: 'Layer masks' },
       { href: '/docs/filters', title: 'Filters and adjustment layers' },
       { href: '/docs/text', title: 'Text layers' },
       { href: '/docs/files', title: 'Saving and exporting' },

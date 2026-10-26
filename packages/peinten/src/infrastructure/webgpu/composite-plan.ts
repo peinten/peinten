@@ -1,8 +1,16 @@
 import { blendModeIndex } from '../../domain/document/blend-mode.ts';
+import { maskFill } from '../../domain/document/layer-mask.ts';
 import type { DocNode, NodeId } from '../../domain/document/nodes.ts';
 import type { DocState } from '../../domain/document/state.ts';
 import type { FilterRegistry, FilterSpec } from '../../domain/filters/filter.ts';
 import { MAX_GROUP_DEPTH } from './compositor.ts';
+
+/** An enabled layer mask that scales a blending item's opacity per pixel. */
+export interface ItemMask {
+  readonly nodeId: NodeId;
+  /** fix15 value of pixels without a mask tile. */
+  readonly fill: number;
+}
 
 export type ProgramItem =
   | {
@@ -11,11 +19,18 @@ export type ProgramItem =
       readonly mode: number;
       readonly opacity: number;
       readonly warp: boolean;
+      readonly mask: ItemMask | null;
     }
-  | { readonly op: 'result'; readonly layer: number; readonly mode: number; readonly opacity: number }
-  | { readonly op: 'filterOut'; readonly mode: number; readonly opacity: number }
+  | {
+      readonly op: 'result';
+      readonly layer: number;
+      readonly mode: number;
+      readonly opacity: number;
+      readonly mask: ItemMask | null;
+    }
+  | { readonly op: 'filterOut'; readonly mode: number; readonly opacity: number; readonly mask: ItemMask | null }
   | { readonly op: 'push' }
-  | { readonly op: 'pop'; readonly mode: number; readonly opacity: number }
+  | { readonly op: 'pop'; readonly mode: number; readonly opacity: number; readonly mask: ItemMask | null }
   | { readonly op: 'base'; readonly layer: number };
 
 export type PlanStep =
@@ -67,7 +82,7 @@ export function planComposite(state: DocState, rootIds: readonly NodeId[], optio
     steps.push({
       kind: 'composite',
       target: gathered,
-      program: [{ op: 'layer', nodeId: preview.nodeId, mode: 0, opacity: 1, warp: false }],
+      program: [{ op: 'layer', nodeId: preview.nodeId, mode: 0, opacity: 1, warp: false, mask: null }],
     });
     steps.push({ kind: 'filter', filter: preview.filter, inputLayer: gathered, useSelection: true });
     steps.push({ kind: 'copyFilterOut', layer: previewLayer });
@@ -84,21 +99,26 @@ export function planComposite(state: DocState, rootIds: readonly NodeId[], optio
   /** Program items for one node inside its parent's program. */
   const compileNode = (node: DocNode, depth: number): ProgramItem[] => {
     const mode = blendModeIndex(node.blendMode);
+    const mask = itemMask(node);
     switch (node.kind) {
       case 'paint':
       case 'text':
         if (node.id === preview?.nodeId && previewLayer >= 0)
-          return [{ op: 'result', layer: previewLayer, mode, opacity: node.opacity }];
-        return [{ op: 'layer', nodeId: node.id, mode, opacity: node.opacity, warp: node.id === options.warpNodeId }];
+          return [{ op: 'result', layer: previewLayer, mode, opacity: node.opacity, mask }];
+        return [
+          { op: 'layer', nodeId: node.id, mode, opacity: node.opacity, warp: node.id === options.warpNodeId, mask },
+        ];
       case 'adjustment':
         return [];
       case 'group': {
         if (hasAdjustment(node.childIds)) {
-          return [{ op: 'result', layer: compileIsolated(node.childIds, depth + 1), mode, opacity: node.opacity }];
+          const layer = compileIsolated(node.childIds, depth + 1);
+          return [{ op: 'result', layer, mode, opacity: node.opacity, mask }];
         }
         const children = compileList(node.childIds, depth + 1);
-        if (node.passThrough || depth >= MAX_GROUP_DEPTH) return scaleOpacity(children, node.opacity);
-        return [{ op: 'push' }, ...children, { op: 'pop', mode, opacity: node.opacity }];
+        // A masked group needs its own result to apply the mask to, so it cannot pass through.
+        if ((node.passThrough && !mask) || depth >= MAX_GROUP_DEPTH) return scaleOpacity(children, node.opacity);
+        return [{ op: 'push' }, ...children, { op: 'pop', mode, opacity: node.opacity, mask }];
       }
     }
   };
@@ -113,11 +133,12 @@ export function planComposite(state: DocState, rootIds: readonly NodeId[], optio
   const compileIsolated = (ids: readonly NodeId[], depth: number): number => {
     let program: ProgramItem[] = [];
     let previous = -1;
-    let pendingFilter: { filter: FilterSpec; mode: number; opacity: number } | null = null;
+    let pendingFilter: { filter: FilterSpec; mode: number; opacity: number; mask: ItemMask | null } | null = null;
     const close = (): number => {
       if (pendingFilter) {
-        steps.push({ kind: 'filter', filter: pendingFilter.filter, inputLayer: previous, useSelection: false });
-        program.unshift({ op: 'filterOut', mode: pendingFilter.mode, opacity: pendingFilter.opacity });
+        const { filter, ...item } = pendingFilter;
+        steps.push({ kind: 'filter', filter, inputLayer: previous, useSelection: false });
+        program.unshift({ op: 'filterOut', ...item });
       }
       if (previous >= 0) program.unshift({ op: 'base', layer: previous });
       const layer = allocate();
@@ -130,7 +151,12 @@ export function planComposite(state: DocState, rootIds: readonly NodeId[], optio
       if (node.kind === 'adjustment') {
         previous = close();
         program = [];
-        pendingFilter = { filter: node.filter, mode: blendModeIndex(node.blendMode), opacity: node.opacity };
+        pendingFilter = {
+          filter: node.filter,
+          mode: blendModeIndex(node.blendMode),
+          opacity: node.opacity,
+          mask: itemMask(node),
+        };
         margin += options.filters.margin(node.filter);
         continue;
       }
@@ -146,6 +172,10 @@ export function planComposite(state: DocState, rootIds: readonly NodeId[], optio
     steps.push({ kind: 'composite', target: 'final', program: compileList(rootIds, 0) });
   }
   return { steps, stageLayers: nextLayer, margin };
+}
+
+function itemMask(node: DocNode): ItemMask | null {
+  return node.mask?.enabled ? { nodeId: node.id, fill: maskFill(node.mask) } : null;
 }
 
 /** Multiplies the opacity of every top-level blending item, which is how pass-through groups apply their opacity. */

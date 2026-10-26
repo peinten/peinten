@@ -28,6 +28,8 @@ export interface NodeSnapshot {
   readonly filter: FilterSpec | null;
   readonly text: TextLayerData | null;
   readonly thumbnail: Thumbnail | null;
+  /** The layer mask, if the node has one, with a grayscale thumbnail once it has been rendered. */
+  readonly mask: { readonly enabled: boolean; readonly thumbnail: Thumbnail | null } | null;
   /**
    * Changes whenever the node's own pixels do: the tiles of a paint layer or the content of a text layer. Thumbnails
    * and other properties leave it alone, so it tells when to read pixels back.
@@ -44,6 +46,8 @@ export interface DocumentSnapshot {
   /** This client's selection; `bounds` encloses every pixel with any coverage. */
   readonly selection: { readonly bounds: Rect } | null;
   readonly quickMask: boolean;
+  /** Strokes go to the active node's layer mask instead of its pixels. */
+  readonly editingMask: boolean;
   readonly history: { readonly canUndo: boolean; readonly canRedo: boolean };
   readonly filterPreview: { readonly nodeId: NodeId; readonly filter: FilterSpec } | null;
   readonly collab: CollabState;
@@ -54,9 +58,11 @@ export interface SnapshotInput {
   readonly clientId: string;
   readonly activeNodeId: NodeId | null;
   readonly quickMask: boolean;
+  readonly editingMask: boolean;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
   readonly thumbnails: ReadonlyMap<NodeId, Thumbnail>;
+  readonly maskThumbnails: ReadonlyMap<NodeId, Thumbnail>;
   readonly filterPreview: DocumentSnapshot['filterPreview'];
   readonly collab: CollabState;
 }
@@ -67,7 +73,12 @@ function pixelsSource(node: DocNode): unknown {
   return node.kind === 'text' ? node.text : null;
 }
 
-function nodeSnapshot(node: DocNode, thumbnail: Thumbnail | null, pixelsVersion: number): NodeSnapshot {
+function nodeSnapshot(
+  node: DocNode,
+  thumbnail: Thumbnail | null,
+  maskThumbnail: Thumbnail | null,
+  pixelsVersion: number,
+): NodeSnapshot {
   return {
     id: node.id,
     kind: node.kind,
@@ -83,6 +94,7 @@ function nodeSnapshot(node: DocNode, thumbnail: Thumbnail | null, pixelsVersion:
     filter: node.kind === 'adjustment' ? node.filter : null,
     text: node.kind === 'text' ? node.text : null,
     thumbnail,
+    mask: node.mask ? { enabled: node.mask.enabled, thumbnail: maskThumbnail } : null,
     pixelsVersion,
   };
 }
@@ -93,7 +105,10 @@ function nodeSnapshot(node: DocNode, thumbnail: Thumbnail | null, pixelsVersion:
  */
 export class SnapshotBuilder {
   #previous: DocumentSnapshot | null = null;
-  readonly #nodeSources = new Map<NodeId, { node: DocNode; thumbnail: Thumbnail | null; snapshot: NodeSnapshot }>();
+  readonly #nodeSources = new Map<
+    NodeId,
+    { node: DocNode; thumbnail: Thumbnail | null; maskThumbnail: Thumbnail | null; snapshot: NodeSnapshot }
+  >();
   #lastPixelsVersion = 0;
   #selectionSource: unknown = null;
 
@@ -103,8 +118,9 @@ export class SnapshotBuilder {
     let nodesChanged = !prev;
     for (const [id, node] of input.state.nodes) {
       const thumbnail = input.thumbnails.get(id) ?? null;
+      const maskThumbnail = input.maskThumbnails.get(id) ?? null;
       const cached = this.#nodeSources.get(id);
-      if (cached && cached.node === node && cached.thumbnail === thumbnail) {
+      if (cached && cached.node === node && cached.thumbnail === thumbnail && cached.maskThumbnail === maskThumbnail) {
         nodes[id] = cached.snapshot;
         continue;
       }
@@ -112,8 +128,8 @@ export class SnapshotBuilder {
         cached && pixelsSource(cached.node) === pixelsSource(node)
           ? cached.snapshot.pixelsVersion
           : ++this.#lastPixelsVersion;
-      const snapshot = nodeSnapshot(node, thumbnail, pixelsVersion);
-      this.#nodeSources.set(id, { node, thumbnail, snapshot });
+      const snapshot = nodeSnapshot(node, thumbnail, maskThumbnail, pixelsVersion);
+      this.#nodeSources.set(id, { node, thumbnail, maskThumbnail, snapshot });
       nodes[id] = snapshot;
       nodesChanged = true;
     }
@@ -142,6 +158,7 @@ export class SnapshotBuilder {
       activeNodeId: input.activeNodeId,
       selection,
       quickMask: input.quickMask,
+      editingMask: input.editingMask,
       history,
       filterPreview: input.filterPreview,
       collab: input.collab,
@@ -155,6 +172,7 @@ export class SnapshotBuilder {
       prev.activeNodeId === next.activeNodeId &&
       prev.selection === next.selection &&
       prev.quickMask === next.quickMask &&
+      prev.editingMask === next.editingMask &&
       prev.history === next.history &&
       prev.filterPreview === next.filterPreview &&
       prev.collab === next.collab

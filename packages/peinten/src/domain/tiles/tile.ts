@@ -31,6 +31,13 @@ export function tileKey(tx: number, ty: number): TileKey {
 export function tileCoords(key: TileKey): readonly [number, number] {
   return [(key % SPAN) - OFFSET, Math.floor(key / SPAN) - OFFSET];
 }
+/** Returns true when every value of the tile equals `value`, the implicit value of a missing tile. */
+export function isUniformTile(tile: Uint16Array, value: number): boolean {
+  if (value === 0) return isEmptyTile(tile);
+  for (let i = 0; i < tile.length; i++) if (tile[i] !== value) return false;
+  return true;
+}
+
 /** Returns true when every value of the tile is zero, so the tile can be dropped from sparse storage. */
 export function isEmptyTile(tile: Uint16Array): boolean {
   // Compare 32 bits at a time; tiles are always 4-byte aligned.

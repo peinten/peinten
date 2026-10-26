@@ -6,6 +6,17 @@ import type { BlendMode } from './blend-mode.ts';
 export type NodeId = string;
 export type ClientId = string;
 
+/**
+ * A layer mask: per-pixel visibility of the node, 1 showing it and 0 hiding it. Tiles hold fix15 coverage; pixels
+ * without a tile take `fill`, so a mask that reveals or hides everything costs no tiles.
+ */
+export interface LayerMask {
+  readonly tiles: MaskMap;
+  readonly fill: 0 | 1;
+  /** A disabled mask is kept but has no effect. */
+  readonly enabled: boolean;
+}
+
 interface NodeBase {
   readonly id: NodeId;
   readonly parentId: NodeId | null;
@@ -13,6 +24,7 @@ interface NodeBase {
   readonly visible: boolean;
   readonly opacity: number;
   readonly blendMode: BlendMode;
+  readonly mask?: LayerMask;
 }
 
 export interface PaintLayer extends NodeBase {

@@ -48,3 +48,30 @@ describe('PSD export', () => {
     expect(adjusted!.imageData!.data[0]).toBe(9);
   });
 });
+
+describe('PSD layer masks', () => {
+  it('writes masks with their rectangle, default color and state', async () => {
+    const state = await applyAll(await richDoc(), [
+      ops.selectShape({ mode: 'replace', shape: { kind: 'rect', x: 0, y: 0, width: 30, height: 30 } }),
+      ops.addMask({ nodeId: 'L', from: 'selection' }),
+      ops.updateMask({ nodeId: 'L', enabled: false }),
+    ]);
+    const withoutAdjustment = await applyAll(state, [
+      ops.removeNode({ nodeId: [...state.nodes.values()].find((n) => n.kind === 'adjustment')!.id }),
+    ]);
+    const size = state.width * state.height * 4;
+    const blob = await psdExporter()(
+      createExportSource({
+        state: withoutAdjustment,
+        readComposite: async () => new Uint8ClampedArray(size),
+        readGroup: async () => new Uint8ClampedArray(size),
+        textRaster: () => undefined,
+      }),
+    );
+    const psd = readPsd(new Uint8Array(await blob.arrayBuffer()), { useImageData: true });
+    const mask = psd.children![0]!.mask!;
+    expect(mask).toMatchObject({ left: 0, top: 0, right: 64, bottom: 64, defaultColor: 0, disabled: true });
+    expect(mask.imageData!.data[0]).toBe(255);
+    expect(mask.imageData!.data[(40 * 64 + 40) * 4]).toBe(0);
+  });
+});

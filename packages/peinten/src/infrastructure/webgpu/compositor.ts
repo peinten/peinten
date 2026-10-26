@@ -23,6 +23,11 @@ export const OP = {
   base: 6,
   /** Blend atlas tile `argument` with the warp preview applied (lifted content plus warped content). */
   warpLayer: 7,
+  /**
+   * Scale the opacity of the next blending instruction per pixel by mask atlas tile `argument`, a layer mask. Where
+   * there is no tile (`EMPTY_SLOT`) the mask's fill, given in fix15 as the third component, applies.
+   */
+  mask: 8,
 } as const;
 
 /** Atlas slot meaning "no tile here", used where an instruction must run even without layer content. */
@@ -50,6 +55,7 @@ struct Params { docSize: vec2u, warpUseSelection: u32, pad: u32, warpRect: vec4i
 @group(0) @binding(6) var<storage, read> instructions: array<vec4u>;
 @group(0) @binding(7) var<uniform> params: Params;
 @group(0) @binding(8) var output: texture_storage_2d<${output}, write>;
+@group(0) @binding(9) var masks: texture_2d_array<u32>;
 
 fn fix15(v: vec4u) -> vec4f { return vec4f(v) / 32768.0; }
 
@@ -59,6 +65,14 @@ fn loadAtlas(slot: u32, local: vec2u) -> vec4f {
   let index = slot % ${PAGE_TILES * PAGE_TILES}u;
   let texel = vec2u(index % ${PAGE_TILES}u, index / ${PAGE_TILES}u) * ${TILE_SIZE}u + local;
   return fix15(textureLoad(atlas, texel, page, 0));
+}
+
+fn loadMask(slot: u32, local: vec2u, fill: u32) -> f32 {
+  if (slot == ${EMPTY_SLOT}u) { return f32(fill) / 32768.0; }
+  let page = slot / ${PAGE_TILES * PAGE_TILES}u;
+  let index = slot % ${PAGE_TILES * PAGE_TILES}u;
+  let texel = vec2u(index % ${PAGE_TILES}u, index / ${PAGE_TILES}u) * ${TILE_SIZE}u + local;
+  return f32(textureLoad(masks, texel, page, 0).r) / 32768.0;
 }
 
 fn liftCoverage(px: vec2u) -> f32 {
@@ -78,10 +92,17 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   var stack: array<vec4f, ${MAX_STACK}>;
   var sp = 0u;
   stack[0] = vec4f(0.0);
+  // Set by a mask instruction and consumed by the next blending instruction.
+  var maskValue = 1.0;
   for (var i = header.offset; i < header.offset + header.count; i++) {
     let ins = instructions[i];
     let mode = ins.z;
-    let opacity = bitcast<f32>(ins.w);
+    let opacity = bitcast<f32>(ins.w) * maskValue;
+    if (ins.x == ${OP.mask}u) {
+      maskValue = loadMask(ins.y, local, ins.z);
+      continue;
+    }
+    maskValue = 1.0;
     switch ins.x {
       case ${OP.layer}u: { stack[sp] = blendOver(stack[sp], loadAtlas(ins.y, local), mode, opacity); }
       case ${OP.result}u: { stack[sp] = blendOver(stack[sp], fix15(textureLoad(results, px, ins.y, 0)), mode, opacity); }
@@ -124,6 +145,8 @@ export interface CompositeDispatch {
   readonly filterOut: GPUTextureView;
   readonly selection: GPUTextureView;
   readonly warped: GPUTextureView;
+  /** Layer mask tiles (`r16uint` atlas). */
+  readonly masks: GPUTextureView;
   /** [tx, ty, offset, count] per tile. */
   readonly headers: Uint32Array;
   readonly instructions: Uint32Array;
@@ -155,6 +178,7 @@ export class Compositor {
           { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
           { binding: 7, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
           { binding: 8, visibility: GPUShaderStage.COMPUTE, storageTexture: { format, access: 'write-only' } },
+          { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { ...uintTexture, viewDimension: '2d-array' } },
         ],
       });
       const pipeline = device.createComputePipeline({
@@ -209,6 +233,7 @@ export class Compositor {
         },
         { binding: 7, resource: { buffer: buffer(new Uint8Array(params), GPUBufferUsage.UNIFORM) } },
         { binding: 8, resource: d.output },
+        { binding: 9, resource: d.masks },
       ],
     });
     const pass = encoder.beginComputePass({ label: 'composite' });

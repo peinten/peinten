@@ -34,6 +34,7 @@ export interface WorkerApi {
   redo(id: number): Promise<void>;
   setActiveNode(id: number, nodeId: NodeId | null): void;
   setQuickMask(id: number, enabled: boolean): void;
+  setEditingMask(id: number, enabled: boolean): void;
   setFilterPreview(id: number, preview: { nodeId: NodeId; filter: FilterSpec } | null): void;
   serialize(id: number): Promise<Uint8Array>;
   /** Holds the document unchanged for an exporter on the main thread until `endExport`. */

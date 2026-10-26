@@ -18,6 +18,7 @@ function source(state: DocState, extra: Partial<RenderSource> = {}): RenderSourc
     textRasters: new Map(),
     selection: null,
     liveSelection: null,
+    liveMask: null,
     quickMask: false,
     selectionOffset: null,
     warpPreview: null,
@@ -25,7 +26,7 @@ function source(state: DocState, extra: Partial<RenderSource> = {}): RenderSourc
     ...extra,
   };
 }
-const noHint = { liveKeys: new Map(), liveSelectionKeys: [] };
+const noHint = { liveKeys: new Map(), liveSelectionKeys: [], liveMaskKeys: [] };
 
 /** CPU reference of the W3C separable/non-separable formulas for one pixel of straight colors. */
 function referenceBlend(mode: BlendMode, cb: number[], cs: number[]): number[] {
@@ -191,6 +192,73 @@ describe('GPU compositing', () => {
     expect(incremental).toEqual(await fresh.readComposite());
     cache.dispose();
     fresh.dispose();
+  });
+});
+
+describe('layer masks', () => {
+  const render = async (state: DocState) => {
+    const cache = new DocumentGpuCache(gpu, opContext.filters, state.width, state.height);
+    cache.sync(source(state), noHint);
+    const pixels = await cache.readComposite();
+    cache.dispose();
+    return pixels;
+  };
+  const alphaAt = (pixels: Uint8ClampedArray, x: number, y: number) => pixels[(y * 64 + x) * 4 + 3];
+  const leftHalf = ops.selectShape({ mode: 'replace', shape: { kind: 'rect', x: 0, y: 0, width: 32, height: 64 } });
+
+  it('hides a layer where its mask is black, unless the mask is disabled', async () => {
+    let state = await fill(newDoc(64, 64), 'L', [200, 40, 40, 255]);
+    state = await applyAll(state, [leftHalf, ops.addMask({ nodeId: 'L', from: 'selection' }), ops.deselect()]);
+    const masked = await render(state);
+    expect([alphaAt(masked, 10, 10), alphaAt(masked, 50, 10)]).toEqual([255, 0]);
+    state = await applyAll(state, [ops.updateMask({ nodeId: 'L', enabled: false })]);
+    expect(alphaAt(await render(state), 50, 10)).toBe(255);
+  });
+
+  it('limits an adjustment layer to its mask', async () => {
+    const data = new Uint8ClampedArray(64 * 64 * 4).map((_, i) => (i % 4 === 3 || (i / 4) % 64 >= 32 ? 255 : 0));
+    const blur = ops.addAdjustmentLayer({ name: 'Blur', filter: { type: 'gaussian-blur', radius: 6 } });
+    const base = await applyAll(newDoc(64, 64), [
+      ops.putPixels({ nodeId: 'L', x: 0, y: 0, width: 64, height: 64, data }),
+      blur,
+    ]);
+    const sharp = await render(
+      await applyAll(base, [ops.updateNode({ nodeId: blur.nodeId, props: { visible: false } })]),
+    );
+    const blurred = await render(base);
+    const red = (pixels: Uint8ClampedArray, x: number) => pixels[(10 * 64 + x) * 4];
+    expect(red(blurred, 30)).not.toBe(red(sharp, 30));
+    const hidden = await render(await applyAll(base, [ops.addMask({ nodeId: blur.nodeId, from: 'hide' })]));
+    expect(hidden).toEqual(sharp);
+    const revealed = await render(await applyAll(base, [ops.addMask({ nodeId: blur.nodeId })]));
+    expect(revealed).toEqual(blurred);
+    // Masked to the right half: the blur shows right of x = 32 only.
+    const half = await render(
+      await applyAll(base, [
+        ops.selectShape({ mode: 'replace', shape: { kind: 'rect', x: 32, y: 0, width: 32, height: 64 } }),
+        ops.addMask({ nodeId: blur.nodeId, from: 'selection' }),
+        ops.deselect(),
+      ]),
+    );
+    expect(red(half, 30)).toBe(red(sharp, 30));
+    expect(red(half, 33)).toBe(red(blurred, 33));
+  });
+
+  it('masks whole groups, pass-through ones included', async () => {
+    const group = ops.addGroup({ name: 'G' });
+    let state = await fill(newDoc(64, 64), 'L', [200, 40, 40, 255]);
+    state = await applyAll(state, [
+      group,
+      ops.moveNode({ nodeId: 'L', parentId: group.nodeId, index: 0 }),
+      leftHalf,
+      ops.addMask({ nodeId: group.nodeId, from: 'selection' }),
+      ops.deselect(),
+    ]);
+    const isolated = await render(state);
+    expect([alphaAt(isolated, 10, 10), alphaAt(isolated, 50, 10)]).toEqual([255, 0]);
+    state = await applyAll(state, [ops.updateNode({ nodeId: group.nodeId, props: { passThrough: true } })]);
+    const passThrough = await render(state);
+    expect([alphaAt(passThrough, 10, 10), alphaAt(passThrough, 50, 10)]).toEqual([255, 0]);
   });
 });
 

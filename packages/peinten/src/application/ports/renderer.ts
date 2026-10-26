@@ -32,6 +32,8 @@ export interface RenderSource {
   readonly selection: MaskMap | null;
   /** Live tiles of a quick-mask stroke that shadow `selection`. */
   readonly liveSelection: ReadonlyMap<TileKey, Uint16Array> | null;
+  /** Live tiles of a stroke on a layer mask that shadow that node's mask tiles. */
+  readonly liveMask: { readonly nodeId: NodeId; readonly tiles: ReadonlyMap<TileKey, Uint16Array> } | null;
   readonly quickMask: boolean;
   /** Draws the selection outline shifted by whole pixels while a tool drags it. */
   readonly selectionOffset: { readonly x: number; readonly y: number } | null;
@@ -43,6 +45,7 @@ export interface RenderSource {
 export interface DirtyHint {
   readonly liveKeys: ReadonlyMap<NodeId, readonly TileKey[]>;
   readonly liveSelectionKeys: readonly TileKey[];
+  readonly liveMaskKeys: readonly TileKey[];
 }
 
 /** GPU caches of one document: tile atlas, composite, intermediates. Port implemented in infrastructure. */

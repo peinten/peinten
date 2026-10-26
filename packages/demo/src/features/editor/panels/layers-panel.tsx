@@ -23,6 +23,7 @@ import { Panel } from '@/components/panel';
 import { SelectField } from '@/components/select-field';
 import { useSnapshot } from '@/hooks/snapshots';
 import { useEditor } from '../editor-context';
+import { MaskControls } from './mask-controls';
 
 const ROOT = '__root__';
 const BLEND_ITEMS = BLEND_MODES.map((mode) => ({
@@ -39,12 +40,13 @@ export function placementAbove(snapshot: DocumentSnapshot): { parentId: string |
   return { parentId: active.parentId, index: siblings.indexOf(active.id) + 1 };
 }
 
-function Thumbnail({ node }: { node: NodeSnapshot }) {
+/** A 40×30 canvas showing a thumbnail bitmap, letterboxed. */
+function ThumbnailCanvas({ thumbnail, className }: { thumbnail: NodeSnapshot['thumbnail']; className: string }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const ctx = canvas.current?.getContext('2d');
-    if (!ctx || !node.thumbnail) return;
-    const { bitmap } = node.thumbnail;
+    if (!ctx || !thumbnail) return;
+    const { bitmap } = thumbnail;
     ctx.clearRect(0, 0, 40, 30);
     const scale = Math.min(40 / bitmap.width, 30 / bitmap.height);
     ctx.drawImage(
@@ -54,15 +56,17 @@ function Thumbnail({ node }: { node: NodeSnapshot }) {
       bitmap.width * scale,
       bitmap.height * scale,
     );
-  }, [node.thumbnail]);
+  }, [thumbnail]);
+  return <canvas ref={canvas} width={40} height={30} className={className} />;
+}
+
+function Thumbnail({ node }: { node: NodeSnapshot }) {
   if (node.kind === 'group') return <Folder className="mx-3 size-4 text-ink-400" />;
   if (node.kind === 'adjustment') return <SlidersHorizontal className="mx-3 size-4 text-ink-400" />;
   if (node.kind === 'text' && !node.thumbnail) return <Type className="mx-3 size-4 text-ink-400" />;
   return (
-    <canvas
-      ref={canvas}
-      width={40}
-      height={30}
+    <ThumbnailCanvas
+      thumbnail={node.thumbnail}
       className="rounded-sm bg-[conic-gradient(#888_25%,#bbb_0_50%,#888_0_75%,#bbb_0)] bg-[length:8px_8px]"
     />
   );
@@ -217,6 +221,7 @@ export function LayersPanel() {
               </label>
             )}
           </div>
+          <MaskControls node={active} />
         </div>
       )}
       <div {...tree.getContainerProps('Layers')} className="relative">
@@ -258,6 +263,21 @@ export function LayersPanel() {
                   ))}
               </span>
               <Thumbnail node={node} />
+              {node.mask && (
+                <button
+                  type="button"
+                  aria-label="Paint mask"
+                  title={
+                    node.mask.enabled ? 'Layer mask: click to paint it' : 'Layer mask (disabled): click to paint it'
+                  }
+                  onClick={() => void document.setActiveNode(node.id).then(() => document.setEditingMask(true))}
+                  className={`rounded-sm ring-offset-1 ring-offset-ink-900 ${
+                    node.id === snapshot.activeNodeId && snapshot.editingMask ? 'ring-2 ring-accent' : ''
+                  } ${node.mask.enabled ? '' : 'opacity-40'}`}
+                >
+                  <ThumbnailCanvas thumbnail={node.mask.thumbnail} className="block rounded-sm bg-ink-950" />
+                </button>
+              )}
               {renaming === node.id ? (
                 <input
                   // biome-ignore lint/a11y/noAutofocus: rename input opens on explicit double click

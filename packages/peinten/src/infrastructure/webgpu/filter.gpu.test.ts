@@ -24,12 +24,13 @@ const source = (state: DocState): RenderSource => ({
   textRasters: new Map(),
   selection: state.selections.get('me') ?? null,
   liveSelection: null,
+  liveMask: null,
   quickMask: false,
   selectionOffset: null,
   warpPreview: null,
   filterPreview: null,
 });
-const noHint = { liveKeys: new Map(), liveSelectionKeys: [] };
+const noHint = { liveKeys: new Map(), liveSelectionKeys: [], liveMaskKeys: [] };
 
 async function apply(state: DocState, drafts: Parameters<typeof applyAll>[1]): Promise<DocState> {
   let next = state;

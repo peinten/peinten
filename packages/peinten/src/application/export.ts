@@ -1,10 +1,11 @@
 import type { BlendMode } from '../domain/document/blend-mode.ts';
-import type { NodeId } from '../domain/document/nodes.ts';
+import { maskFill } from '../domain/document/layer-mask.ts';
+import type { LayerMask, NodeId } from '../domain/document/nodes.ts';
 import { type DocState, getNode } from '../domain/document/state.ts';
 import { contentBounds } from '../domain/raster/bounds.ts';
-import { tilesToRgba8 } from '../domain/raster/pixels.ts';
+import { maskTilesToGray8, tilesToRgba8 } from '../domain/raster/pixels.ts';
 import type { TextLayerData } from '../domain/text/text-layer.ts';
-import { intersectRect, type TileMap } from '../domain/tiles/tile-map.ts';
+import { intersectRect, type TileMap, tileMapBounds } from '../domain/tiles/tile-map.ts';
 
 /** Straight 8-bit RGBA. */
 export interface RasterImage {
@@ -19,11 +20,24 @@ export interface PlacedImage extends RasterImage {
   readonly y: number;
 }
 
+/** A layer mask as file formats see it: 8-bit visibility inside a rectangle, `fill` everywhere else. */
+export interface ExportMask {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  /** One byte per pixel, 255 showing the layer. */
+  readonly data: Uint8ClampedArray;
+  readonly fill: 0 | 1;
+  readonly enabled: boolean;
+}
+
 interface ExportLayerBase {
   readonly name: string;
   readonly visible: boolean;
   readonly opacity: number;
   readonly blendMode: BlendMode;
+  readonly mask: ExportMask | null;
 }
 
 /** A layer as file formats see it. Children are ordered bottom to top, like the document. */
@@ -60,6 +74,18 @@ interface ExportReader {
   textRaster(id: NodeId): TileMap | undefined;
 }
 
+function exportMask(mask: LayerMask | undefined, state: DocState): ExportMask | null {
+  if (!mask) return null;
+  const bounds = tileMapBounds(mask.tiles);
+  const rect = (bounds && intersectRect(bounds, { x: 0, y: 0, width: state.width, height: state.height })) ?? {
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+  };
+  return { ...rect, data: maskTilesToGray8(mask.tiles, rect, maskFill(mask)), fill: mask.fill, enabled: mask.enabled };
+}
+
 function placeTiles(tiles: TileMap, state: DocState): PlacedImage | null {
   const bounds = contentBounds(tiles, 4);
   const rect = bounds && intersectRect(bounds, { x: 0, y: 0, width: state.width, height: state.height });
@@ -76,7 +102,13 @@ async function exportLayers(source: ExportReader, ids: readonly NodeId[]): Promi
   const layers: ExportLayer[] = [];
   for (const id of ids) {
     const node = getNode(state, id);
-    const base = { name: node.name, visible: node.visible, opacity: node.opacity, blendMode: node.blendMode };
+    const base = {
+      name: node.name,
+      visible: node.visible,
+      opacity: node.opacity,
+      blendMode: node.blendMode,
+      mask: exportMask(node.mask, state),
+    };
     switch (node.kind) {
       case 'paint':
         layers.push({ ...base, kind: 'pixels', image: placeTiles(node.tiles, state) });
@@ -134,6 +166,7 @@ export function createExportSource(reader: ExportReader): ExportSource {
           visible: true,
           opacity: 1,
           blendMode: 'normal',
+          mask: null,
           kind: 'pixels',
           image: { ...image, x: 0, y: 0 },
         },

@@ -11,6 +11,7 @@ import type { Rect } from '../tiles/tile-map.ts';
 import type { ResizeCanvasDraft } from './canvas-ops.ts';
 import type { ApplyFilterDraft } from './filter-ops.ts';
 import { newId } from './ids.ts';
+import type { AddMaskDraft, ApplyMaskDraft, RemoveMaskDraft, UpdateMaskDraft } from './mask-ops.ts';
 import type {
   AddAdjustmentLayerDraft,
   AddGroupDraft,
@@ -132,6 +133,16 @@ export const ops = {
     ...p,
   }),
   rasterizeNode: (p: { readonly nodeId: NodeId }): RasterizeNodeDraft => ({ type: 'rasterize-node', nodeId: p.nodeId }),
+  /** Adds a layer mask that shows everything (`reveal`, the default), nothing (`hide`) or the issuer's selection. */
+  addMask: (p: { readonly nodeId: NodeId; readonly from?: AddMaskDraft['from'] }): AddMaskDraft => ({
+    type: 'add-mask',
+    nodeId: p.nodeId,
+    from: p.from ?? 'reveal',
+  }),
+  removeMask: (p: { readonly nodeId: NodeId }): RemoveMaskDraft => ({ type: 'remove-mask', ...p }),
+  updateMask: (p: Omit<UpdateMaskDraft, 'type'>): UpdateMaskDraft => ({ type: 'update-mask', ...p }),
+  /** Bakes a paint layer's mask into its pixels. */
+  applyMask: (p: { readonly nodeId: NodeId }): ApplyMaskDraft => ({ type: 'apply-mask', ...p }),
   /** `offsetX`/`offsetY` place the old top-left corner on the new canvas; they default to 0. */
   resizeCanvas: (p: {
     readonly width: number;

@@ -1,6 +1,7 @@
 import { setOpEnabledOp } from '../history/toggle.ts';
 import { resizeCanvasOp } from './canvas-ops.ts';
 import { applyFilterOp } from './filter-ops.ts';
+import { addMaskOp, applyMaskOp, removeMaskOp, updateMaskOp } from './mask-ops.ts';
 import {
   addAdjustmentLayerOp,
   addGroupOp,
@@ -40,6 +41,10 @@ export const coreOperations: readonly AnyOperationDefinition[] = [
   clearOp,
   putTilesOp,
   resizeCanvasOp,
+  addMaskOp,
+  removeMaskOp,
+  updateMaskOp,
+  applyMaskOp,
   warpOp,
   applyFilterOp,
   rasterizeNodeOp,

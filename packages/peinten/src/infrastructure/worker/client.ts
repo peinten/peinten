@@ -79,6 +79,7 @@ export async function connectRuntime<T extends readonly AnyTool[]>(
         redo: () => api.redo(id),
         setActiveNode: (nodeId) => api.setActiveNode(id, nodeId),
         setQuickMask: (enabled) => api.setQuickMask(id, enabled),
+        setEditingMask: (enabled) => api.setEditingMask(id, enabled),
         setFilterPreview: (preview) => api.setFilterPreview(id, preview),
         serialize: () => api.serialize(id),
         async export(exporter) {

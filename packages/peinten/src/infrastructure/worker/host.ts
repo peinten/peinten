@@ -58,6 +58,7 @@ export function serveRuntime(
     redo: (id) => doc(id).redo(),
     setActiveNode: (id, nodeId) => doc(id).setActiveNode(nodeId),
     setQuickMask: (id, enabled) => doc(id).setQuickMask(enabled),
+    setEditingMask: (id, enabled) => doc(id).setEditingMask(enabled),
     setFilterPreview: (id, preview) => doc(id).setFilterPreview(preview),
     serialize: async (id) => {
       const bytes = await doc(id).serialize();

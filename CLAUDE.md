@@ -93,7 +93,11 @@ Biome `noRestrictedImports` overrides in `biome.json` enforce the layer rules fo
   occupies the queue until it ends, which is how peer commits are deferred during a stroke. `StrokeSession` holds
   working tiles that shadow committed tiles on screen until the stroke commits.
 - Persistent changes go through `dispatch` (an array is one atomic, single-undo batch); per-client state
-  (active node, quick mask, previews, tool, resources) has dedicated methods and never enters history.
+  (active node, quick mask, mask editing, previews, tool, resources) has dedicated methods and never enters history.
+- Layer masks (`node.mask`, `domain/document/layer-mask.ts`, `domain/ops/mask-ops.ts`) are single-channel tiles plus
+  a `fill` for missing tiles, so anything that moves or reads mask tiles must use the fill (`translateTiles(..., fill)`,
+  `MaskSurface` options, `decodeTiles`) rather than assume missing means 0. Strokes reach a mask through the
+  `{ maskOf }` target.
 
 ### Rendering
 
@@ -108,7 +112,9 @@ in between. Filters (WGSL) use integer math only so results are bit-identical ac
 adjustment layers share one kernel. A GPU validation error invalidates the whole command buffer and leaves outputs
 zeroed, so `GpuFilterExecutor` runs inside an error scope and throws `OperationConflictError` on failure, and it
 restores pixels with zero selection coverage after readback. `WebGpuBackend.create` validates custom kernels and
-forwards uncaptured GPU errors to `onError`.
+forwards uncaptured GPU errors to `onError`. Masks live in a second, `r16uint` atlas (`TileSources`); an `OP.mask`
+instruction before a blending instruction scales its opacity per pixel, which covers layers, folders (`pop`) and
+adjustment layers (`filterOut`) alike.
 
 ### Runtime surface and snapshots
 

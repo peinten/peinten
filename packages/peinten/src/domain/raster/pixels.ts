@@ -1,5 +1,5 @@
 import { FIX15_ONE, isEmptyTile, RGBA_TILE_LENGTH, TILE_SIZE, type TileKey, tileKey } from '../tiles/tile.ts';
-import { forEachTileInRect, type Rect, type TileMap } from '../tiles/tile-map.ts';
+import { forEachTileInRect, type MaskMap, type Rect, type TileMap } from '../tiles/tile-map.ts';
 
 /** Converts straight 8-bit RGBA pixels placed at (x, y) into premultiplied fix15 tiles. Empty tiles are omitted. */
 export function rgba8ToTiles(
@@ -54,6 +54,25 @@ export function tilesToRgba8(tiles: TileMap, rect: Rect): Uint8ClampedArray {
         out[d + 1] = (tile[s + 1]! / a) * 255 + 0.5;
         out[d + 2] = (tile[s + 2]! / a) * 255 + 0.5;
         out[d + 3] = (a / FIX15_ONE) * 255 + 0.5;
+      }
+    }
+  });
+  return out;
+}
+
+/** Reads the rectangle out of fix15 mask tiles as 8-bit coverage, one byte per pixel; missing tiles read as `fill`. */
+export function maskTilesToGray8(tiles: MaskMap, rect: Rect, fill: number): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(rect.width * rect.height).fill((fill / FIX15_ONE) * 255 + 0.5);
+  forEachTileInRect(rect, (tx, ty) => {
+    const tile = tiles.get(tileKey(tx, ty));
+    if (!tile) return;
+    for (let py = 0; py < TILE_SIZE; py++) {
+      const dy = ty * TILE_SIZE + py - rect.y;
+      if (dy < 0 || dy >= rect.height) continue;
+      for (let px = 0; px < TILE_SIZE; px++) {
+        const dx = tx * TILE_SIZE + px - rect.x;
+        if (dx >= 0 && dx < rect.width)
+          out[dy * rect.width + dx] = (tile[py * TILE_SIZE + px]! / FIX15_ONE) * 255 + 0.5;
       }
     }
   });

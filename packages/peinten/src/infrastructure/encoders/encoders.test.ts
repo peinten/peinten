@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { hashTiles, opContext, richDoc } from '../../../test/helpers.ts';
+import { applyAll, hashTiles, newDoc, opContext, richDoc } from '../../../test/helpers.ts';
+import { maskValue } from '../../domain/document/layer-mask.ts';
 import type { DocNode } from '../../domain/document/nodes.ts';
 import { deserializeDocument, serializeDocument } from '../../domain/document/serialization.ts';
 import type { DocState } from '../../domain/document/state.ts';
+import { ops } from '../../domain/ops/factories.ts';
 import { cborDocumentCodec } from './cbor-document-codec.ts';
 
 function summarize(state: DocState) {
@@ -17,6 +19,18 @@ describe('document files', () => {
     expect([...bytes.slice(0, 3)]).toEqual([0xd9, 0xd9, 0xf7]);
     const restored = deserializeDocument(cborDocumentCodec.decode(bytes), opContext.filters);
     expect(summarize(restored)).toEqual({ ...summarize(state), selections: [] });
+  });
+
+  it('round-trips layer masks, including fully hidden tiles of a revealing mask', async () => {
+    const state = await applyAll(newDoc(), [
+      ops.selectShape({ mode: 'replace', shape: { kind: 'rect', x: 0, y: 0, width: 64, height: 64 } }),
+      ops.addMask({ nodeId: 'L', from: 'selection' }),
+      ops.updateMask({ nodeId: 'L', invert: true, enabled: false }),
+    ]);
+    const bytes = cborDocumentCodec.encode(serializeDocument(state, { selections: false }));
+    const mask = deserializeDocument(cborDocumentCodec.decode(bytes), opContext.filters).nodes.get('L')!.mask!;
+    expect([mask.fill, mask.enabled, mask.tiles.size]).toEqual([1, false, 1]);
+    expect([maskValue(mask, 10, 10), maskValue(mask, 100, 10)]).toEqual([0, 1]);
   });
 
   it('keeps selections only in collaboration snapshots', async () => {

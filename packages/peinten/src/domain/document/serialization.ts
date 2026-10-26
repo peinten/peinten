@@ -3,7 +3,7 @@ import * as v from 'valibot';
 import type { FilterSpec } from '../filters/filter.ts';
 import { textLayerDataSchema } from '../text/schema.ts';
 import type { TextLayerData } from '../text/text-layer.ts';
-import { isEmptyTile, MASK_TILE_LENGTH, RGBA_TILE_LENGTH, tileCoords, tileKey } from '../tiles/tile.ts';
+import { FIX15_ONE, isUniformTile, MASK_TILE_LENGTH, RGBA_TILE_LENGTH, tileCoords, tileKey } from '../tiles/tile.ts';
 import type { TileMap } from '../tiles/tile-map.ts';
 import type { BlendMode } from './blend-mode.ts';
 import type { ClientId, DocNode, NodeId } from './nodes.ts';
@@ -22,6 +22,7 @@ interface SerializedNodeBase {
   readonly visible: boolean;
   readonly opacity: number;
   readonly blendMode: BlendMode;
+  readonly mask?: { readonly tiles: readonly SerializedTile[]; readonly fill: 0 | 1; readonly enabled: boolean };
 }
 
 type SerializedNode =
@@ -57,7 +58,13 @@ export interface SerializedDocument {
 
 const tileCoordSchema = v.pipe(v.number(), v.integer(), v.minValue(-32768), v.maxValue(32767));
 const tilesSchema = v.array(v.object({ x: tileCoordSchema, y: tileCoordSchema, data: v.instance(Uint8Array) }));
-const nodeBase = { name: nameSchema, visible: v.boolean(), opacity: opacitySchema, blendMode: blendModeSchema };
+const nodeBase = {
+  name: nameSchema,
+  visible: v.boolean(),
+  opacity: opacitySchema,
+  blendMode: blendModeSchema,
+  mask: v.optional(v.object({ tiles: tilesSchema, fill: v.picklist([0, 1]), enabled: v.boolean() })),
+};
 const sizeSchema = v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(65536));
 
 const documentSchema = v.object({
@@ -98,7 +105,8 @@ function encodeTiles(tiles: TileMap): SerializedTile[] {
   });
 }
 
-function decodeTiles(tiles: readonly SerializedTile[], length: number): Map<number, Uint16Array> {
+/** `fill` is the value of missing tiles; tiles holding only that value are dropped. */
+function decodeTiles(tiles: readonly SerializedTile[], length: number, fill = 0): Map<number, Uint16Array> {
   const result = new Map<number, Uint16Array>();
   for (const { x, y, data } of tiles) {
     const bytes = inflateSync(data);
@@ -106,13 +114,21 @@ function decodeTiles(tiles: readonly SerializedTile[], length: number): Map<numb
     // Copy into a fresh buffer: inflated output may not be 2-byte aligned.
     const tile = new Uint16Array(length);
     new Uint8Array(tile.buffer).set(bytes);
-    if (!isEmptyTile(tile)) result.set(tileKey(x, y), tile);
+    if (!isUniformTile(tile, fill)) result.set(tileKey(x, y), tile);
   }
   return result;
 }
 
 function serializeNode(node: DocNode): SerializedNode {
-  const base = { name: node.name, visible: node.visible, opacity: node.opacity, blendMode: node.blendMode };
+  const base = {
+    name: node.name,
+    visible: node.visible,
+    opacity: node.opacity,
+    blendMode: node.blendMode,
+    ...(node.mask && {
+      mask: { tiles: encodeTiles(node.mask.tiles), fill: node.mask.fill, enabled: node.mask.enabled },
+    }),
+  };
   switch (node.kind) {
     case 'paint':
       return {
@@ -165,6 +181,13 @@ export function deserializeDocument(input: unknown, filters: { parse(input: unkn
         visible: source.visible,
         opacity: source.opacity,
         blendMode: source.blendMode,
+        ...(source.mask && {
+          mask: {
+            tiles: decodeTiles(source.mask.tiles, MASK_TILE_LENGTH, source.mask.fill * FIX15_ONE),
+            fill: source.mask.fill,
+            enabled: source.mask.enabled,
+          },
+        }),
       };
       switch (source.kind) {
         case 'paint':

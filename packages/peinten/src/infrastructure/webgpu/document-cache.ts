@@ -3,28 +3,11 @@ import type { NodeId } from '../../domain/document/nodes.ts';
 import type { FilterRegistry } from '../../domain/filters/filter.ts';
 import { MASK_TILE_LENGTH, TILE_SIZE, type TileKey, tileCoords, tileKey } from '../../domain/tiles/tile.ts';
 import { inflateRect, intersectRect, type Rect, type TileMap, unionRect } from '../../domain/tiles/tile-map.ts';
-import { type CompositePlan, type PlanStep, type ProgramItem, planComposite } from './composite-plan.ts';
+import { type CompositePlan, type ItemMask, type PlanStep, type ProgramItem, planComposite } from './composite-plan.ts';
 import { EMPTY_SLOT, OP } from './compositor.ts';
 import type { GpuShared } from './gpu-shared.ts';
 import { halfPremultipliedToRgba8, readTexture } from './readback.ts';
-import { TileAtlas } from './tile-atlas.ts';
-
-interface SlotEntry {
-  tile: Uint16Array;
-  slot: number;
-}
-
-type LiveLayers = readonly ReadonlyMap<TileKey, Uint16Array>[];
-
-interface SourceRecord {
-  committed: TileMap;
-  live: LiveLayers;
-  entries: Map<TileKey, SlotEntry>;
-}
-
-function sameLayers(a: LiveLayers, b: LiveLayers): boolean {
-  return a.length === b.length && a.every((tiles, i) => tiles === b[i]);
-}
+import { TileSources } from './tile-sources.ts';
 
 const ZERO_MASK = new Uint16Array(MASK_TILE_LENGTH);
 const f32 = new Float32Array(1);
@@ -44,7 +27,8 @@ export class DocumentGpuCache implements DocumentRenderCache {
   readonly #filters: FilterRegistry;
   #width: number;
   #height: number;
-  readonly #atlas: TileAtlas;
+  readonly #pixels: TileSources;
+  readonly #masks: TileSources;
   #composite: GPUTexture;
   #selection: GPUTexture;
   readonly #dummyUint: GPUTexture;
@@ -54,7 +38,6 @@ export class DocumentGpuCache implements DocumentRenderCache {
   #filterOut: GPUTexture | null = null;
   #warped: GPUTexture | null = null;
 
-  readonly #sources = new Map<NodeId, SourceRecord>();
   readonly #selectionTiles = new Map<TileKey, Uint16Array>();
   #lastSelection: TileMap<Uint16Array> | null = null;
   #lastLiveSelection: ReadonlyMap<TileKey, Uint16Array> | null = null;
@@ -72,7 +55,8 @@ export class DocumentGpuCache implements DocumentRenderCache {
     this.#width = width;
     this.#height = height;
     const device = gpu.device;
-    this.#atlas = new TileAtlas(device, 'rgba16uint');
+    this.#pixels = new TileSources(device, 'rgba16uint');
+    this.#masks = new TileSources(device, 'r16uint');
     [this.#composite, this.#selection] = this.#createCanvasTextures();
     this.#dummyUint = device.createTexture({
       size: [1, 1],
@@ -184,53 +168,6 @@ export class DocumentGpuCache implements DocumentRenderCache {
     }
   }
 
-  /** Uploads changed tiles of one node. Returns the bounds of the tiles that changed. */
-  #syncSource(nodeId: NodeId, committed: TileMap, live: LiveLayers, liveKeys: readonly TileKey[]): Rect | null {
-    let record = this.#sources.get(nodeId);
-    if (!record) {
-      record = { committed: new Map(), live: [], entries: new Map() };
-      this.#sources.set(nodeId, record);
-    }
-    let dirty: Rect | null = null;
-    const mark = (key: TileKey) => {
-      const [tx, ty] = tileCoords(key);
-      dirty = unionRect(dirty, { x: tx * TILE_SIZE, y: ty * TILE_SIZE, width: TILE_SIZE, height: TILE_SIZE });
-    };
-    const put = (key: TileKey, tile: Uint16Array | undefined, force: boolean) => {
-      const entry = record.entries.get(key);
-      if (!tile) {
-        if (!entry) return;
-        this.#atlas.release(entry.slot);
-        record.entries.delete(key);
-        mark(key);
-        return;
-      }
-      if (entry && entry.tile === tile && !force) return;
-      const slot = entry?.slot ?? this.#atlas.allocate();
-      this.#atlas.upload(slot, tile);
-      record.entries.set(key, { tile, slot });
-      mark(key);
-    };
-    const effective = (key: TileKey) => {
-      for (const tiles of live) {
-        const tile = tiles.get(key);
-        if (tile) return tile;
-      }
-      return committed.get(key);
-    };
-    if (record.committed !== committed || !sameLayers(record.live, live)) {
-      for (const key of committed.keys()) put(key, effective(key), false);
-      for (const tiles of live)
-        for (const key of tiles.keys()) if (!committed.has(key)) put(key, effective(key), false);
-      for (const key of [...record.entries.keys()])
-        if (!committed.has(key) && !live.some((tiles) => tiles.has(key))) put(key, undefined, false);
-      record.committed = committed;
-      record.live = live;
-    }
-    for (const key of liveKeys) put(key, effective(key), true);
-    return dirty;
-  }
-
   #syncSelection(source: RenderSource, hint: DirtyHint): void {
     const selection = source.selection;
     const live = source.liveSelection;
@@ -288,20 +225,32 @@ export class DocumentGpuCache implements DocumentRenderCache {
     if (state.width !== this.#width || state.height !== this.#height) this.#resize(state.width, state.height);
     let dirty: Rect | null = null;
 
-    // Pixel sources: paint layers (with the live stroke on top) and rendered text.
-    const seen = new Set<NodeId>();
+    // Pixel sources: paint layers (with the live strokes on top) and rendered text; then layer masks.
+    const withPixels = new Set<NodeId>();
+    const withMasks = new Set<NodeId>();
     for (const node of state.nodes.values()) {
-      if (node.kind !== 'paint' && node.kind !== 'text') continue;
-      seen.add(node.id);
-      const committed = node.kind === 'paint' ? node.tiles : (source.textRasters.get(node.id) ?? new Map());
-      const live = source.live.filter((entry) => entry.nodeId === node.id).map((entry) => entry.tiles);
-      dirty = unionRect(dirty, this.#syncSource(node.id, committed, live, hint.liveKeys.get(node.id) ?? []));
+      if (node.kind === 'paint' || node.kind === 'text') {
+        withPixels.add(node.id);
+        const committed = node.kind === 'paint' ? node.tiles : (source.textRasters.get(node.id) ?? new Map());
+        const live = source.live.filter((entry) => entry.nodeId === node.id).map((entry) => entry.tiles);
+        dirty = unionRect(dirty, this.#pixels.sync(node.id, committed, live, hint.liveKeys.get(node.id) ?? []));
+      }
+      if (node.mask) {
+        withMasks.add(node.id);
+        const isLive = source.liveMask?.nodeId === node.id;
+        dirty = unionRect(
+          dirty,
+          this.#masks.sync(
+            node.id,
+            node.mask.tiles,
+            isLive ? [source.liveMask!.tiles] : [],
+            isLive ? hint.liveMaskKeys : [],
+          ),
+        );
+      }
     }
-    for (const [id, record] of this.#sources) {
-      if (seen.has(id)) continue;
-      for (const entry of record.entries.values()) this.#atlas.release(entry.slot);
-      this.#sources.delete(id);
-    }
+    this.#pixels.prune(withPixels);
+    this.#masks.prune(withMasks);
     this.#syncSelection(source, hint);
 
     const key = this.#computeStructureKey(source);
@@ -358,7 +307,6 @@ export class DocumentGpuCache implements DocumentRenderCache {
     warp: NonNullable<RenderSource['warpPreview']>,
     transients: GPUBuffer[],
   ): void {
-    const record = this.#sources.get(warp.nodeId);
     const tx0 = Math.floor(warp.source.x / TILE_SIZE);
     const ty0 = Math.floor(warp.source.y / TILE_SIZE);
     const tx1 = Math.floor((warp.source.x + warp.source.width - 1) / TILE_SIZE);
@@ -368,15 +316,15 @@ export class DocumentGpuCache implements DocumentRenderCache {
     const table = new Uint32Array(cols * rows).fill(EMPTY_SLOT);
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
-        const entry = record?.entries.get(tileKey(tx, ty));
-        if (entry) table[(ty - ty0) * cols + (tx - tx0)] = entry.slot;
+        const slot = this.#pixels.slot(warp.nodeId, tileKey(tx, ty));
+        if (slot !== undefined) table[(ty - ty0) * cols + (tx - tx0)] = slot;
       }
     }
     this.#gpu.warpPreview.encode(
       encoder,
       {
         target: this.#warped!.createView(),
-        atlas: this.#atlas.texture.createView({ dimension: '2d-array' }),
+        atlas: this.#pixels.atlas.texture.createView({ dimension: '2d-array' }),
         selection: this.selection.createView(),
         useSelection: this.#source!.selection !== null,
         docWidth: this.width,
@@ -413,13 +361,14 @@ export class DocumentGpuCache implements DocumentRenderCache {
           {
             output: output.createView({ baseMipLevel: 0, mipLevelCount: 1 }),
             outputKind: toFinal ? 'rgba16float' : 'rgba16uint',
-            atlas: this.#atlas.texture.createView({ dimension: '2d-array' }),
+            atlas: this.#pixels.atlas.texture.createView({ dimension: '2d-array' }),
             results:
               this.#results?.createView({ dimension: '2d-array' }) ??
               this.#dummyArray.createView({ dimension: '2d-array' }),
             filterOut: this.#filterOut?.createView() ?? this.#dummyUint.createView(),
             selection: this.selection.createView(),
             warped: this.#warped?.createView() ?? this.#dummyUint.createView(),
+            masks: this.#masks.atlas.texture.createView({ dimension: '2d-array' }),
             headers,
             instructions,
             docWidth: this.width,
@@ -475,11 +424,16 @@ export class DocumentGpuCache implements DocumentRenderCache {
       for (let tx = tx0; tx <= tx1; tx++) {
         const key = tileKey(tx, ty);
         const offset = instructions.length / 4;
+        // Precedes the item it scales; the shader applies it to the next blending instruction only.
+        const pushMask = (mask: ItemMask | null) => {
+          if (mask) instructions.push(OP.mask, this.#masks.slot(mask.nodeId, key) ?? EMPTY_SLOT, mask.fill, 0);
+        };
         for (const item of program) {
           switch (item.op) {
             case 'layer': {
-              const slot = this.#sources.get(item.nodeId)?.entries.get(key)?.slot;
+              const slot = this.#pixels.slot(item.nodeId, key);
               if (slot === undefined && !item.warp) break;
+              pushMask(item.mask);
               instructions.push(
                 item.warp ? OP.warpLayer : OP.layer,
                 slot ?? EMPTY_SLOT,
@@ -489,15 +443,18 @@ export class DocumentGpuCache implements DocumentRenderCache {
               break;
             }
             case 'result':
+              pushMask(item.mask);
               instructions.push(OP.result, item.layer, item.mode, floatBits(item.opacity));
               break;
             case 'filterOut':
+              pushMask(item.mask);
               instructions.push(OP.filterOut, 0, item.mode, floatBits(item.opacity));
               break;
             case 'push':
               instructions.push(OP.push, 0, 0, 0);
               break;
             case 'pop':
+              pushMask(item.mask);
               instructions.push(OP.pop, 0, item.mode, floatBits(item.opacity));
               break;
             case 'base':
@@ -554,7 +511,8 @@ export class DocumentGpuCache implements DocumentRenderCache {
   }
 
   dispose(): void {
-    this.#atlas.dispose();
+    this.#pixels.dispose();
+    this.#masks.dispose();
     this.#composite.destroy();
     this.#selection.destroy();
     this.#dummyUint.destroy();

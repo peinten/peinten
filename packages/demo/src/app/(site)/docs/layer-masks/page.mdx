@@ -1,0 +1,64 @@
+export const metadata = {
+  title: 'Layer masks · peinten docs',
+  description: 'Hide parts of paint, text, folder and adjustment layers without erasing them, and paint the mask with any brush.',
+};
+
+# Layer masks
+
+A layer mask hides parts of a node without touching its pixels: white shows the node, black hides it, gray in between
+fades it. Paint layers, text layers, folders and adjustment layers can all have one. On an adjustment layer the mask
+limits where the filter applies; on a folder it applies to the folder's combined result.
+
+```ts
+import { ops } from 'peinten';
+
+await doc.dispatch(ops.addMask({ nodeId }));                      // shows everything
+await doc.dispatch(ops.addMask({ nodeId, from: 'hide' }));        // hides everything
+await doc.dispatch(ops.addMask({ nodeId, from: 'selection' }));   // shows the current selection
+```
+
+Adding a mask replaces any mask the node had. Like every operation, each of these is one undo step and is shared with
+collaborators.
+
+## Painting the mask
+
+`doc.setEditingMask(true)` sends brush strokes to the active node's mask instead of its pixels, until it is turned off
+or another node becomes active. On a mask, a brush paints the lightness of its color: white shows, black hides, and
+eraser mode hides. Strokes stay inside the selection when there is one.
+
+```ts
+await doc.setActiveNode(nodeId);
+await doc.setEditingMask(true);
+await runtime.setResources({ color: [0, 0, 0] }); // paint to hide
+```
+
+`doc.getSnapshot().editingMask` tells the UI which one the brush is painting, and each node's snapshot has
+`mask: { enabled, thumbnail } | null`. The thumbnail is a grayscale `ImageBitmap` that follows the mask, also while
+a stroke on it is in progress, like layer thumbnails do. Custom tools can paint a mask directly with
+`ctx.beginStroke({ brush, target: { maskOf: nodeId } })`.
+
+## Changing and removing masks
+
+| Factory | Effect |
+|---|---|
+| `ops.updateMask({ nodeId, enabled })` | Turns the mask's effect off or on; a disabled mask is kept |
+| `ops.updateMask({ nodeId, invert: true })` | Swaps shown and hidden |
+| `ops.applyMask({ nodeId })` | Paint layers only: bakes the mask into the pixels and removes it |
+| `ops.removeMask({ nodeId })` | Removes the mask; the node shows fully again |
+
+Masks on locked layers cannot be changed.
+
+## How masks are stored
+
+A mask is single-channel coverage in 64×64 tiles, like a selection, plus a `fill` value for pixels without a tile.
+A mask that shows or hides everything therefore costs nothing, and painting allocates tiles only where the brush goes.
+`resizeCanvas` moves masks with their layers; new areas take the mask's fill. Masks are saved in `.peinten` files and
+exported to PSD as layer masks. Custom exporters receive them as `ExportLayer.mask`, 8-bit coverage inside a rectangle
+plus the fill outside it.
+
+## Limitations
+
+- Transforms and filters change a layer's pixels only; the mask stays where it is.
+- A pass-through folder with an enabled mask is composited as a normal folder, because the mask needs the folder's
+  combined result.
+- Collaborators see a stroke on a mask once it is committed, not while it is drawn.

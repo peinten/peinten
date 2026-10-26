@@ -1,5 +1,5 @@
-import { type Layer, type LayerTextData, type TextStyle, writePsdUint8Array } from 'ag-psd';
-import type { Exporter, ExportLayer, PlacedImage } from '../../application/export.ts';
+import { type Layer, type LayerMaskData, type LayerTextData, type TextStyle, writePsdUint8Array } from 'ag-psd';
+import type { Exporter, ExportLayer, ExportMask, PlacedImage } from '../../application/export.ts';
 import { applyAffine } from '../../domain/geometry/affine.ts';
 import type { TextStyle as PeintenTextStyle, TextLayerData } from '../../domain/text/text-layer.ts';
 
@@ -59,12 +59,31 @@ function textData(text: TextLayerData): LayerTextData {
   };
 }
 
+/** PSD masks are grayscale: the image covers the rectangle and `defaultColor` the rest. */
+function layerMask(mask: ExportMask): LayerMaskData {
+  const rgba = new Uint8ClampedArray(mask.data.length * 4);
+  for (let i = 0; i < mask.data.length; i++) {
+    rgba.fill(mask.data[i]!, i * 4, i * 4 + 3);
+    rgba[i * 4 + 3] = 255;
+  }
+  return {
+    top: mask.y,
+    left: mask.x,
+    bottom: mask.y + mask.height,
+    right: mask.x + mask.width,
+    defaultColor: mask.fill * 255,
+    disabled: !mask.enabled,
+    ...(mask.width > 0 && { imageData: { width: mask.width, height: mask.height, data: rgba } }),
+  };
+}
+
 function toLayer(layer: ExportLayer): Layer {
   const base: Layer = {
     name: layer.name,
     hidden: !layer.visible,
     opacity: layer.opacity,
     blendMode: layer.blendMode.replaceAll('-', ' ') as Layer['blendMode'],
+    ...(layer.mask && { mask: layerMask(layer.mask) }),
   };
   switch (layer.kind) {
     case 'pixels':

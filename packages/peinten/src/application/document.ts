@@ -1,6 +1,7 @@
 import type { ColorMixer } from '../domain/brush/color-mixer.ts';
 import type { BrushSettings } from '../domain/brush/settings.ts';
 import type { StrokeSample } from '../domain/brush/stroke-samples.ts';
+import { maskFill } from '../domain/document/layer-mask.ts';
 import type { ClientId, NodeId, TextLayer } from '../domain/document/nodes.ts';
 import { deserializeDocument, serializeDocument } from '../domain/document/serialization.ts';
 import { type DocState, MAX_DOCUMENT_SIZE, walkNodes } from '../domain/document/state.ts';
@@ -13,7 +14,7 @@ import type { Operation, OperationDraft } from '../domain/ops/operation.ts';
 import type { OperationRegistry } from '../domain/ops/registry.ts';
 import type { StrokeTarget } from '../domain/ops/stroke-renderer.ts';
 import { rgba8ToTiles } from '../domain/raster/pixels.ts';
-import { renderThumbnail } from '../domain/raster/thumbnail.ts';
+import { renderMaskThumbnail, renderThumbnail } from '../domain/raster/thumbnail.ts';
 import type { TextLayerData } from '../domain/text/text-layer.ts';
 import type { TileMap } from '../domain/tiles/tile-map.ts';
 import { ApplyQueue } from './apply-queue.ts';
@@ -26,8 +27,9 @@ import type { DocumentCodec } from './ports/encoding.ts';
 import type { FrameScheduler, ThumbnailFactory } from './ports/platform.ts';
 import type { DocumentRenderCache, RenderSource, WarpPreview } from './ports/renderer.ts';
 import type { TextEngine } from './ports/text.ts';
-import { type DocumentSnapshot, SnapshotBuilder, type Thumbnail } from './snapshot.ts';
+import { type DocumentSnapshot, SnapshotBuilder } from './snapshot.ts';
 import { StrokeSession } from './stroke-session.ts';
+import { ThumbnailStore } from './thumbnail-store.ts';
 import type { StrokeHandle, ToolDocument } from './tool.ts';
 
 const THUMBNAIL_SIZE = 64;
@@ -70,6 +72,8 @@ export class LocalDocument {
   #snapshot: DocumentSnapshot;
   #activeNodeId: NodeId | null;
   #quickMask = false;
+  /** Whether strokes go to the active node's layer mask instead of its pixels. */
+  #editingMask = false;
   #filterPreview: { nodeId: NodeId; filter: FilterSpec } | null = null;
   #warpPreview: WarpPreview | null = null;
   #selectionOffset: RenderSource['selectionOffset'] = null;
@@ -83,8 +87,8 @@ export class LocalDocument {
   #disposed = false;
   readonly #textRasters = new Map<NodeId, { text: TextLayerData; tiles: TileMap }>();
   readonly #textPending = new Map<NodeId, TextLayerData>();
-  readonly #thumbnails = new Map<NodeId, Thumbnail>();
-  readonly #thumbnailSources = new Map<NodeId, { source: unknown; time: number }>();
+  readonly #thumbnails = new ThumbnailStore(THUMBNAIL_INTERVAL_MS);
+  readonly #maskThumbnails = new ThumbnailStore(THUMBNAIL_INTERVAL_MS);
   #thumbnailVersion = 0;
   #thumbnailsInFlight = 0;
 
@@ -114,6 +118,9 @@ export class LocalDocument {
       },
       get quickMask() {
         return doc.#quickMask;
+      },
+      get editingMask() {
+        return doc.#editingMask;
       },
       get selection() {
         return doc.#timeline.state.selections.get(doc.clientId) ?? null;
@@ -186,7 +193,12 @@ export class LocalDocument {
     const active = this.#activeNodeId;
     if (active !== null && !this.#timeline.state.nodes.has(active))
       this.#activeNodeId = this.#timeline.state.rootIds.at(-1) ?? null;
+    if (this.#editingMask && !this.#activeMask) this.#editingMask = false;
     this.#requestFrame();
+  }
+
+  get #activeMask(): boolean {
+    return this.#activeNodeId !== null && this.#timeline.state.nodes.get(this.#activeNodeId)?.mask !== undefined;
   }
 
   undo(): Promise<void> {
@@ -230,7 +242,14 @@ export class LocalDocument {
 
   setActiveNode(id: NodeId | null): void {
     if (id !== null && !this.#timeline.state.nodes.has(id)) throw new Error(`Unknown node: ${id}`);
+    if (id !== this.#activeNodeId) this.#editingMask = false;
     this.#activeNodeId = id;
+    this.#requestFrame();
+  }
+
+  /** Sends strokes to the active node's layer mask, or back to its pixels. Ignored when the node has no mask. */
+  setEditingMask(enabled: boolean): void {
+    this.#editingMask = enabled && this.#activeMask;
     this.#requestFrame();
   }
 
@@ -267,6 +286,10 @@ export class LocalDocument {
     if ('nodeId' in target) {
       const node = this.#timeline.state.nodes.get(target.nodeId);
       if (node?.kind !== 'paint' || node.locked) return null;
+    }
+    if ('maskOf' in target) {
+      const node = this.#timeline.state.nodes.get(target.maskOf);
+      if (!node?.mask || ('locked' in node && node.locked)) return null;
     }
     const seed = params.seed ?? Math.floor(Math.random() * 0x7fffffff);
     const buffered: StrokeSample[] = [];
@@ -327,7 +350,8 @@ export class LocalDocument {
 
   #defaultStrokeTarget(): StrokeTarget | null {
     if (this.#quickMask) return { selection: true };
-    return this.#activeNodeId ? { nodeId: this.#activeNodeId } : null;
+    if (!this.#activeNodeId) return null;
+    return this.#editingMask ? { maskOf: this.#activeNodeId } : { nodeId: this.#activeNodeId };
   }
 
   /** Tool-facing view of the document. */
@@ -366,44 +390,63 @@ export class LocalDocument {
     for (const id of this.#textRasters.keys()) if (!state.nodes.has(id)) this.#textRasters.delete(id);
   }
 
-  /** Regenerates thumbnails of layers whose pixels changed, at most every few hundred milliseconds. */
+  /** Regenerates thumbnails of layers and masks that changed, at most every few hundred milliseconds. */
   #syncThumbnails(state: DocState, time: number): void {
     if (this.#thumbnailsInFlight > 0) return;
+    const stroke = this.#stroke;
+    const target = stroke?.params.target;
     walkNodes(state, (node) => {
-      if (node.kind !== 'paint' && node.kind !== 'text') return;
-      const live =
-        this.#stroke && 'nodeId' in this.#stroke.params.target && this.#stroke.params.target.nodeId === node.id;
       const tiles = node.kind === 'paint' ? node.tiles : this.#textRasters.get(node.id)?.tiles;
-      if (!tiles) return;
-      const source = live ? this.#stroke : tiles;
-      const known = this.#thumbnailSources.get(node.id);
-      if (known && known.source === source && !live) return;
-      if (known && time - known.time < THUMBNAIL_INTERVAL_MS) {
-        this.#requestFrame();
-        return;
+      if ((node.kind === 'paint' || node.kind === 'text') && tiles) {
+        const live = target !== undefined && 'nodeId' in target && target.nodeId === node.id;
+        this.#refreshThumbnail(this.#thumbnails, node.id, live ? stroke : tiles, live, time, () =>
+          renderThumbnail(
+            live ? new Map([...tiles, ...stroke!.workingTiles]) : tiles,
+            state.width,
+            state.height,
+            THUMBNAIL_SIZE,
+          ),
+        );
       }
-      this.#thumbnailSources.set(node.id, { source, time });
-      const pixels = live ? new Map([...tiles, ...this.#stroke!.workingTiles]) : tiles;
-      const image = renderThumbnail(pixels, state.width, state.height, THUMBNAIL_SIZE);
-      this.#thumbnailsInFlight++;
-      this.#deps.thumbnails
-        .create(image.data, image.width, image.height)
-        .then((bitmap) => {
-          this.#thumbnails.get(node.id)?.bitmap.close();
-          this.#thumbnails.set(node.id, { version: ++this.#thumbnailVersion, bitmap });
-        })
-        .catch(this.#deps.onError)
-        .finally(() => {
-          this.#thumbnailsInFlight--;
-          this.#requestFrame();
-        });
+      const mask = node.mask;
+      if (mask) {
+        const live = target !== undefined && 'maskOf' in target && target.maskOf === node.id;
+        this.#refreshThumbnail(this.#maskThumbnails, node.id, live ? stroke : mask, live, time, () =>
+          renderMaskThumbnail(
+            live ? new Map([...mask.tiles, ...stroke!.workingTiles]) : mask.tiles,
+            maskFill(mask),
+            state.width,
+            state.height,
+            THUMBNAIL_SIZE,
+          ),
+        );
+      }
     });
-    for (const id of this.#thumbnails.keys()) {
-      if (state.nodes.has(id)) continue;
-      this.#thumbnails.get(id)!.bitmap.close();
-      this.#thumbnails.delete(id);
-      this.#thumbnailSources.delete(id);
-    }
+    this.#thumbnails.prune((id) => state.nodes.has(id));
+    this.#maskThumbnails.prune((id) => state.nodes.get(id)?.mask !== undefined);
+  }
+
+  #refreshThumbnail(
+    store: ThumbnailStore,
+    nodeId: NodeId,
+    source: unknown,
+    live: boolean,
+    time: number,
+    render: () => { data: Uint8ClampedArray; width: number; height: number },
+  ): void {
+    const due = store.due(nodeId, source, live, time);
+    if (due === 'later') this.#requestFrame();
+    if (due !== 'now') return;
+    const image = render();
+    this.#thumbnailsInFlight++;
+    this.#deps.thumbnails
+      .create(image.data, image.width, image.height)
+      .then((bitmap) => store.set(nodeId, { version: ++this.#thumbnailVersion, bitmap }))
+      .catch(this.#deps.onError)
+      .finally(() => {
+        this.#thumbnailsInFlight--;
+        this.#requestFrame();
+      });
   }
 
   /** Joins a collaboration room. Local edits stay pending until the sequencer confirms them. */
@@ -492,12 +535,13 @@ export class LocalDocument {
           textRasters,
           selection: null,
           liveSelection: null,
+          liveMask: null,
           quickMask: false,
           selectionOffset: null,
           warpPreview: null,
           filterPreview: null,
         },
-        { liveKeys: new Map(), liveSelectionKeys: [] },
+        { liveKeys: new Map(), liveSelectionKeys: [], liveMaskKeys: [] },
       );
       try {
         return await use(
@@ -565,6 +609,7 @@ export class LocalDocument {
       textRasters: new Map([...this.#textRasters].map(([id, entry]) => [id, entry.tiles])),
       selection,
       liveSelection: stroke && target && 'selection' in target ? stroke.workingTiles : null,
+      liveMask: stroke && target && 'maskOf' in target ? { nodeId: target.maskOf, tiles: stroke.workingTiles } : null,
       quickMask: this.#quickMask,
       selectionOffset: this.#selectionOffset,
       warpPreview: this.#warpPreview,
@@ -573,7 +618,11 @@ export class LocalDocument {
     const isSelectionStroke = target !== undefined && 'selection' in target;
     if (target && 'nodeId' in target)
       peers.dirty.set(target.nodeId, [...(peers.dirty.get(target.nodeId) ?? []), ...dirty]);
-    this.#deps.cache.sync(source, { liveKeys: peers.dirty, liveSelectionKeys: isSelectionStroke ? dirty : [] });
+    this.#deps.cache.sync(source, {
+      liveKeys: peers.dirty,
+      liveSelectionKeys: isSelectionStroke ? dirty : [],
+      liveMaskKeys: target && 'maskOf' in target ? dirty : [],
+    });
     let again = false;
     for (const listener of this.#frameListeners) again = listener.frame(time) || again;
     this.#syncThumbnails(state, time);
@@ -591,9 +640,11 @@ export class LocalDocument {
       clientId: this.clientId,
       activeNodeId: this.#activeNodeId,
       quickMask: this.#quickMask,
+      editingMask: this.#editingMask,
       canUndo: this.#canUndo,
       canRedo: this.#canRedo,
-      thumbnails: this.#thumbnails,
+      thumbnails: this.#thumbnails.thumbnails,
+      maskThumbnails: this.#maskThumbnails.thumbnails,
       filterPreview: this.#filterPreview,
       collab: this.#collabState,
     });
@@ -603,7 +654,8 @@ export class LocalDocument {
     this.#disposed = true;
     this.#collab?.close();
     this.#cancelStroke?.();
-    for (const thumbnail of this.#thumbnails.values()) thumbnail.bitmap.close();
+    this.#thumbnails.dispose();
+    this.#maskThumbnails.dispose();
     this.#deps.cache.dispose();
   }
 }

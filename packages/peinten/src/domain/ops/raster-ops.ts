@@ -19,7 +19,11 @@ import { intersectRect, type Rect, type TileMap, tileKeysInRect } from '../tiles
 import { defineOperation, OperationConflictError } from './operation.ts';
 import { StrokeRenderer, type StrokeTarget } from './stroke-renderer.ts';
 
-const targetSchema = v.union([v.object({ nodeId: nodeIdSchema }), v.object({ selection: v.literal(true) })]);
+const targetSchema = v.union([
+  v.object({ nodeId: nodeIdSchema }),
+  v.object({ maskOf: nodeIdSchema }),
+  v.object({ selection: v.literal(true) }),
+]);
 
 /** Stroke input samples in the `SAMPLE_STRIDE` layout. */
 export const strokeSamplesSchema = v.pipe(
@@ -39,6 +43,8 @@ export interface StrokeDraft {
 
 export const strokeOp = defineOperation<StrokeDraft>({
   type: 'stroke',
+  // Version 2 added layer masks as a target.
+  version: 2,
   schema: v.object({
     target: targetSchema,
     brush: brushSettingsSchema,

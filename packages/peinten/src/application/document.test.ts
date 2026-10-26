@@ -54,6 +54,19 @@ describe('LocalDocument', () => {
     expect(node().pixelsVersion).not.toBe(painted.pixelsVersion);
   });
 
+  it('publishes a mask thumbnail once the mask exists', async () => {
+    const { document, scheduler } = newLocalDocument();
+    await document.dispatch(ops.addMask({ nodeId: 'L', from: 'hide' }));
+    for (let i = 0; i < 10 && !document.getSnapshot().nodes.L!.mask?.thumbnail; i++) {
+      scheduler.flush();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(document.getSnapshot().nodes.L!.mask?.thumbnail).not.toBeNull();
+    await document.dispatch(ops.removeMask({ nodeId: 'L' }));
+    scheduler.flush();
+    expect(document.getSnapshot().nodes.L!.mask).toBeNull();
+  });
+
   it('reports the selection bounds to the pixel', async () => {
     const { document, scheduler } = newLocalDocument();
     await document.dispatch(

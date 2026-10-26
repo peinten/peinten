@@ -3,6 +3,21 @@
 Notable changes to peinten, newest first. Versions follow semantic versioning. Breaking changes are listed under
 "Breaking".
 
+## 1.3.0 - Unreleased
+
+### Added
+
+- Layer masks on paint, text, folder and adjustment layers: `ops.addMask`, `ops.updateMask`, `ops.applyMask` and
+  `ops.removeMask`. On an adjustment layer the mask limits where the filter applies.
+- `doc.setEditingMask(enabled)` sends brush strokes to the active node's mask; strokes can also target
+  `{ maskOf: nodeId }`. On a mask, brushes paint their color's lightness.
+- `DocumentSnapshot.editingMask`, and `NodeSnapshot.mask` with a grayscale thumbnail of the mask.
+- Masks are saved in `.peinten` files, exported to PSD and passed to exporters as `ExportLayer.mask`.
+
+### Changed
+
+- The `stroke` operation is now version 2, so collaborators must all run 1.3.0 or later.
+
 ## 1.2.1 - 2026-10-20
 
 ### Fixed

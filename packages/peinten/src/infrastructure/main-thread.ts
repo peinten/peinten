@@ -37,6 +37,7 @@ export class MainThreadRuntime<T extends readonly AnyTool[]> implements PaintRun
       redo: () => local.redo(),
       setActiveNode: async (id) => local.setActiveNode(id),
       setQuickMask: async (enabled) => local.setQuickMask(enabled),
+      setEditingMask: async (enabled) => local.setEditingMask(enabled),
       setFilterPreview: async (preview) => local.setFilterPreview(preview),
       serialize: () => local.serialize(),
       export: (exporter) => local.export(exporter),

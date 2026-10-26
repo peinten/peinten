@@ -1,4 +1,4 @@
-import { isEmptyTile, type MaskTile, type RgbaTile, TILE_SIZE, type TileKey, tileCoords, tileKey } from './tile.ts';
+import { isUniformTile, type MaskTile, type RgbaTile, TILE_SIZE, type TileKey, tileCoords, tileKey } from './tile.ts';
 
 /** Sparse, copy-on-write tile storage. Missing keys mean fully transparent tiles. */
 export type TileMap<T extends Uint16Array = RgbaTile> = ReadonlyMap<TileKey, T>;
@@ -84,8 +84,9 @@ export function inflateRect(rect: Rect, margin: number): Rect {
 
 /**
  * Moves tiles by whole pixels and keeps only what lands inside `bounds`. `channels` is 4 for RGBA tiles and 1 for
- * masks. Tiles that move by whole tiles and stay inside `bounds` are shared instead of copied; tiles left empty are
- * dropped.
+ * masks. `fill` is the value of every pixel without a tile (0 for layers and selections, `FIX15_ONE` for a layer mask
+ * that reveals by default); tiles left at that value are dropped. Tiles that move by whole tiles and stay inside
+ * `bounds` are shared instead of copied.
  */
 export function translateTiles<T extends Uint16Array>(
   tiles: TileMap<T>,
@@ -93,6 +94,7 @@ export function translateTiles<T extends Uint16Array>(
   dy: number,
   bounds: Rect,
   channels: 1 | 4,
+  fill = 0,
 ): Map<TileKey, T> {
   const result = new Map<TileKey, T>();
   const copies = new Set<TileKey>();
@@ -113,7 +115,7 @@ export function translateTiles<T extends Uint16Array>(
       const targetKey = tileKey(ttx, tty);
       let out = result.get(targetKey);
       if (!out) {
-        out = new Uint16Array(TILE_SIZE * TILE_SIZE * channels) as T;
+        out = new Uint16Array(TILE_SIZE * TILE_SIZE * channels).fill(fill) as T;
         result.set(targetKey, out);
         copies.add(targetKey);
       }
@@ -125,6 +127,6 @@ export function translateTiles<T extends Uint16Array>(
       }
     });
   }
-  for (const key of copies) if (isEmptyTile(result.get(key)!)) result.delete(key);
+  for (const key of copies) if (isUniformTile(result.get(key)!, fill)) result.delete(key);
   return result;
 }

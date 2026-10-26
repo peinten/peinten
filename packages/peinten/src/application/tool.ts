@@ -74,6 +74,8 @@ export interface ToolDocument {
   readonly clientId: ClientId;
   readonly activeNodeId: NodeId | null;
   readonly quickMask: boolean;
+  /** Strokes go to the active node's layer mask. */
+  readonly editingMask: boolean;
   /** This client's selection. */
   readonly selection: MaskMap | null;
   /** Rendered pixels of a text layer, if it has been rasterized. */

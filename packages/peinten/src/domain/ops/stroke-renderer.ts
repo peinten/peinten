@@ -5,13 +5,14 @@ import { MaskSurface } from '../brush/mask-surface.ts';
 import type { BrushSettings } from '../brush/settings.ts';
 import { SAMPLE_STRIDE } from '../brush/stroke-samples.ts';
 import { TiledSurface } from '../brush/tiled-surface.ts';
+import { maskFill } from '../document/layer-mask.ts';
 import type { ClientId, NodeId, PaintLayer } from '../document/nodes.ts';
 import type { DocState } from '../document/state.ts';
 import type { TileKey } from '../tiles/tile.ts';
 import { OperationConflictError } from './operation.ts';
 
-/** Where a stroke paints: a paint layer, or the issuing client's selection mask (quick mask). */
-export type StrokeTarget = { readonly nodeId: NodeId } | { readonly selection: true };
+/** Where a stroke paints: a paint layer, a node's layer mask, or the issuing client's selection mask (quick mask). */
+export type StrokeTarget = { readonly nodeId: NodeId } | { readonly maskOf: NodeId } | { readonly selection: true };
 
 export interface StrokeParams {
   readonly target: StrokeTarget;
@@ -37,6 +38,17 @@ export class StrokeRenderer {
     const bounds = { x: 0, y: 0, width: state.width, height: state.height };
     if ('selection' in params.target) {
       this.surface = new MaskSurface(state.selections.get(params.clientId) ?? new Map(), bounds);
+      return;
+    }
+    if ('maskOf' in params.target) {
+      const node = state.nodes.get(params.target.maskOf);
+      if (!node?.mask) throw new OperationConflictError('Strokes can only target existing layer masks');
+      if ('locked' in node && node.locked) throw new OperationConflictError(`Layer ${node.id} is locked`);
+      this.surface = new MaskSurface(node.mask.tiles, bounds, {
+        fill: maskFill(node.mask),
+        lightness: true,
+        clip: state.selections.get(params.clientId) ?? null,
+      });
       return;
     }
     const layer = state.nodes.get(params.target.nodeId);
@@ -83,6 +95,14 @@ export class StrokeRenderer {
       if (mask.size === 0) selections.delete(this.#params.clientId);
       else selections.set(this.#params.clientId, mask);
       return { ...state, selections };
+    }
+    if ('maskOf' in target) {
+      const node = state.nodes.get(target.maskOf)!;
+      const tiles = (this.surface as MaskSurface).commit();
+      if (tiles === node.mask!.tiles) return state;
+      const nodes = new Map(state.nodes);
+      nodes.set(node.id, { ...node, mask: { ...node.mask!, tiles } });
+      return { ...state, nodes };
     }
     const layer = state.nodes.get(target.nodeId) as PaintLayer;
     const tiles = (this.surface as TiledSurface).commit();

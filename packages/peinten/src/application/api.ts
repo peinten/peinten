@@ -67,6 +67,8 @@ export interface PaintDocument extends SnapshotSource<DocumentSnapshot> {
   redo(): Promise<void>;
   setActiveNode(id: NodeId | null): Promise<void>;
   setQuickMask(enabled: boolean): Promise<void>;
+  /** Sends brush strokes to the active node's layer mask, or back to its pixels. Ignored without a mask. */
+  setEditingMask(enabled: boolean): Promise<void>;
   setFilterPreview(preview: { readonly nodeId: NodeId; readonly filter: FilterSpec } | null): Promise<void>;
   /** The document as a `.peinten` file. History and selections are not included. */
   serialize(): Promise<Uint8Array>;
